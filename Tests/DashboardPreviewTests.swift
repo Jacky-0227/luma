@@ -50,29 +50,36 @@ final class DashboardPreviewTests: XCTestCase {
     @MainActor
     func testGlobalQueueCoalescesDuplicatesAndSkipsCancelledQueuedRequests() async throws {
         let probe = PreviewFetchProbe(data: Self.jpeg())
+        var consumers: [Task<UIImage?, Never>] = []
+        defer { consumers.forEach { $0.cancel() }; probe.releaseAll() }
         let service = DashboardPreviewService(fetch: { try await probe.fetch($0, password: $1) })
         let cameras = (1...4).map { CameraConfiguration(name: "Fixture \($0)", host: "camera.local", channel: $0) }
         let first = Task { @MainActor in await service.image(for: cameras[0], password: "test") }
-        await probe.waitForRequests(1)
+        consumers.append(first)
+        try await probe.waitForRequests(1)
         let duplicate = Task { @MainActor in await service.image(for: cameras[0], password: "test") }
+        consumers.append(duplicate)
         let second = Task { @MainActor in await service.image(for: cameras[1], password: "test") }
-        await probe.waitForRequests(2)
+        consumers.append(second)
+        try await probe.waitForRequests(2)
         var queuedStarted = false
         let cancelledQueued = Task { @MainActor in
             queuedStarted = true
             return await service.image(for: cameras[2], password: "test")
         }
+        consumers.append(cancelledQueued)
         while !queuedStarted { await Task.yield() }
         var fourthStarted = false
         let fourth = Task { @MainActor in
             fourthStarted = true
             return await service.image(for: cameras[3], password: "test")
         }
+        consumers.append(fourth)
         while !fourthStarted { await Task.yield() }
         cancelledQueued.cancel()
         probe.release(channel: 1)
         probe.release(channel: 2)
-        await probe.waitForRequests(3)
+        try await probe.waitForRequests(3)
         XCTAssertEqual(probe.channels, [1, 2, 4])
         XCTAssertLessThanOrEqual(probe.maximumActive, 2)
         probe.release(channel: 4)
@@ -85,15 +92,19 @@ final class DashboardPreviewTests: XCTestCase {
     @MainActor
     func testCancellingOneWaiterKeepsSharedFetchAndReopenAfterCancellationCanRestart() async throws {
         let probe = PreviewFetchProbe(data: Self.jpeg())
+        var consumers: [Task<UIImage?, Never>] = []
+        defer { consumers.forEach { $0.cancel() }; probe.releaseAll() }
         let service = DashboardPreviewService(fetch: { try await probe.fetch($0, password: $1) })
         let camera = CameraConfiguration(name: "Fixture", host: "camera.local")
         let first = Task { @MainActor in await service.image(for: camera, password: "test") }
-        await probe.waitForRequests(1)
+        consumers.append(first)
+        try await probe.waitForRequests(1)
         var secondStarted = false
         let second = Task { @MainActor in
             secondStarted = true
             return await service.image(for: camera, password: "test")
         }
+        consumers.append(second)
         while !secondStarted { await Task.yield() }
         first.cancel()
         let cancelled = await first.value
@@ -105,12 +116,14 @@ final class DashboardPreviewTests: XCTestCase {
 
         let nextCamera = CameraConfiguration(name: "Another fixture", host: "camera.local", channel: 2)
         let abandoned = Task { @MainActor in await service.image(for: nextCamera, password: "test") }
-        await probe.waitForRequests(2)
+        consumers.append(abandoned)
+        try await probe.waitForRequests(2)
         abandoned.cancel()
         let abandonedResult = await abandoned.value
         XCTAssertNil(abandonedResult)
         let reopened = Task { @MainActor in await service.image(for: nextCamera, password: "test") }
-        await probe.waitForRequests(3)
+        consumers.append(reopened)
+        try await probe.waitForRequests(3)
         probe.release(channel: 2)
         let reopenedResult = await reopened.value
         XCTAssertNotNil(reopenedResult)
@@ -182,6 +195,7 @@ private final class PreviewFetchProbe {
     private(set) var channels: [Int] = []
     private(set) var maximumActive = 0
     private var active = 0
+    private var released = false
     private var blocked: [Int: [CheckedContinuation<Void, Never>]] = [:]
 
     init(data: Data) { self.data = data }
@@ -191,16 +205,26 @@ private final class PreviewFetchProbe {
         channels.append(camera.channel)
         active += 1
         maximumActive = max(maximumActive, active)
-        await withCheckedContinuation { blocked[camera.channel, default: []].append($0) }
+        if !released { await withCheckedContinuation { blocked[camera.channel, default: []].append($0) } }
         active -= 1
         try Task.checkCancellation()
         return data
     }
 
-    func waitForRequests(_ count: Int) async {
+    func waitForRequests(_ count: Int) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while channels.count < count, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(1)) }
-        XCTAssertEqual(channels.count, count)
+        guard channels.count == count else {
+            XCTFail("The preview mock did not receive the expected number of requests before its deadline.")
+            throw PreviewProbeError.unexpectedRequestCount
+        }
+    }
+
+    func releaseAll() {
+        released = true
+        let continuations = blocked.values.flatMap { $0 }
+        blocked = [:]
+        continuations.forEach { $0.resume() }
     }
 
     func release(channel: Int) {
@@ -208,3 +232,5 @@ private final class PreviewFetchProbe {
         continuations.forEach { $0.resume() }
     }
 }
+
+private enum PreviewProbeError: Error { case unexpectedRequestCount }
