@@ -1,0 +1,75 @@
+name: Build Luma for iPhone
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: luma-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test on iOS 26 and package unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      COCOAPODS_DISABLE_STATS: 'true'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate source metadata
+        run: python3 scripts/validate-project.py
+
+      - name: Prepare pinned build tools and dependency
+        run: bash scripts/ci-bootstrap.sh
+
+      - name: Run model and interface tests
+        run: bash scripts/ci-test.sh
+
+      - name: Package iPhone IPA
+        run: bash scripts/ci-package.sh
+
+      - name: Collect test summary and interface screenshots
+        if: always()
+        run: bash scripts/ci-diagnostics.sh
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Luma-iPhone-unsigned
+          path: build/output/Luma-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Upload compact diagnostics and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: Luma-test-report
+          path: build/Diagnostics/
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Write build summary
+        if: success()
+        run: |
+          {
+            echo '### Luma build ready'
+            echo 'Download **Luma-iPhone-unsigned**, extract the ZIP, then open the IPA in Sideloadly.'
+            echo 'The IPA is unsigned. Sideloadly signs it locally using your Apple account.'
+            echo 'Simulator tests do not verify camera access or free-account installation on a real iPhone.'
+            echo 'Artifacts expire after one day; keep the downloaded IPA locally.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,94 @@
+name: Luma
+options:
+  bundleIdPrefix: app.luma
+  minimumXcodeGenVersion: "2.46.0"
+  developmentLanguage: en
+  useBaseInternationalization: false
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.2"
+  projectFormat: xcode16_0
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    CLANG_ENABLE_MODULES: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: "0.1.0"
+  configs:
+    Debug:
+      ENABLE_TESTABILITY: YES
+    Release:
+      SWIFT_COMPILATION_MODE: wholemodule
+      SWIFT_OPTIMIZATION_LEVEL: -O
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+targets:
+  Luma:
+    type: application
+    platform: iOS
+    sources:
+      - path: Luma
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.luma.viewer
+        PRODUCT_NAME: Luma
+        SWIFT_OBJC_BRIDGING_HEADER: Luma/Playback/Luma-Bridging-Header.h
+        INFOPLIST_FILE: Luma/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+  LumaTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Luma
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.luma.viewer.tests
+        GENERATE_INFOPLIST_FILE: YES
+  LumaUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Luma
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.luma.viewer.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Luma:
+    build:
+      targets:
+        Luma: all
+        LumaTests: [test]
+        LumaUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: LumaTests
+          parallelizable: false
+        - name: LumaUITests
+          parallelizable: false
+    archive:
+      config: Release

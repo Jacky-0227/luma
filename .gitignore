@@ -1,0 +1,27 @@
+# Generated Xcode/CocoaPods output
+Luma.xcodeproj/
+Luma.xcworkspace/
+Pods/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+__pycache__/
+
+# Local credentials / signing / camera data must stay off GitHub.
+.env
+.env.*
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+*.ipa
+*.xcarchive/
+*.xcresult/
+camera-config*.json
+camera-credentials*.json
+local-settings*.json
+
+# Keep a real CocoaPods lockfile after the first macOS resolution.
+!Podfile.lock
