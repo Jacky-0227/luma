@@ -3,303 +3,192 @@ import UIKit
 
 struct DashboardView: View {
     let store: CameraStore
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var session = DashboardSession()
-    @State private var page = 0
-    @State private var isVisible = false
-    @State private var isOpeningCamera = false
-    @State private var selectedCamera: CameraConfiguration?
-    @State private var showingCamera = false
-    @State private var navigationRequest: UUID?
-    @State private var keepsScreenAwake = false
+    @State private var dashboards = DashboardStore()
+    @State private var editor: DashboardEditorRoute?
+    @State private var deleting: DashboardConfiguration?
+    @State private var showingOrder = false
+    @State private var message: InterfaceMessage?
 
-    private var pageCount: Int { max(1, (store.cameras.count + 3) / 4) }
-    private var pageCameras: [CameraConfiguration] {
-        Array(store.cameras.dropFirst(min(page, pageCount - 1) * 4).prefix(4))
-    }
-    private var hasPlayingCamera: Bool {
-        session.cameras.contains { $0.player?.state == .playing }
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 14), count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
     }
 
     var body: some View {
-        NavigationStack { content }
-    }
-
-    private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Every angle. Together.")
-                        .font(.title2.weight(.semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Up to four cameras at a time. Fluent streams, sound off.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if store.cameras.isEmpty {
-                    ContentUnavailableView("No cameras yet", systemImage: "square.grid.2x2", description: Text("Add a camera from the home screen to use the dashboard."))
-                } else {
-                    cameraGrid
-                    if pageCount > 1 { pageControls }
-                    Label("Tap a camera to open its live view and controls.", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if pageCameras.contains(where: { !$0.customPath.isEmpty }) {
-                        Text("Cameras with a custom path use that stream in the dashboard.")
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Every angle. Together.")
+                            .font(.title2.weight(.semibold))
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Arrange the views that matter to you.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if dashboards.dashboards.isEmpty {
+                        ContentUnavailableView {
+                            Label("Your dashboards", systemImage: "rectangle.split.2x2")
+                        } description: {
+                            Text("Create a dashboard and bring your cameras together.")
+                        } actions: {
+                            Button("Add dashboard", systemImage: "plus") { editor = DashboardEditorRoute() }
+                                .buttonStyle(.glassProminent)
+                                .foregroundStyle(LumaTheme.onAccent)
+                        }
+                    } else {
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 22) {
+                            ForEach(dashboards.dashboards) { dashboard in dashboardCard(dashboard) }
+                        }
+                    }
+                    if store.cameras.isEmpty {
+                        Label("Add a camera from the home screen to use the dashboard.", systemImage: "video.badge.plus")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
+                .padding(20)
+                .frame(maxWidth: 1000)
+                .frame(maxWidth: .infinity)
             }
-            .padding(20)
-            .frame(maxWidth: 1000)
-            .frame(maxWidth: .infinity)
-        }
-        .background { LumaBackground() }
-        .navigationTitle("Dashboard")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Reconnect cameras", systemImage: "arrow.clockwise") { synchronize(forceRestart: true) }
-                    .disabled(store.cameras.isEmpty || session.isTransitioning || isOpeningCamera)
-                    .accessibilityIdentifier("dashboard.reconnect")
-            }
-        }
-        .navigationDestination(isPresented: $showingCamera) {
-            if let selectedCamera {
-                CameraConnectionView(configuration: selectedCamera, store: store)
-            }
-        }
-        .onAppear {
-            isVisible = true
-            synchronize()
-        }
-        .onDisappear {
-            releaseScreenAwake()
-            isVisible = false
-            navigationRequest = nil
-            isOpeningCamera = false
-            session.suspend()
-        }
-        .onChange(of: scenePhase) { _, _ in synchronize() }
-        .onChange(of: hasPlayingCamera) { _, _ in updateScreenAwake() }
-        .onChange(of: page) { _, _ in synchronize() }
-        .onChange(of: store.cameras) { _, _ in
-            let boundedPage = min(page, pageCount - 1)
-            if boundedPage != page { page = boundedPage }
-            else { synchronize() }
-        }
-        .onChange(of: showingCamera) { _, isShowing in
-            if !isShowing {
-                selectedCamera = nil
-                synchronize()
-            }
-        }
-    }
-
-    private var cameraGrid: some View {
-        // At most four surfaces: eager layout keeps an offscreen accessibility
-        // row from being torn down/recreated by a lazy container while scrolling.
-        Grid(alignment: .top, horizontalSpacing: 12, verticalSpacing: 14) {
-            if dynamicTypeSize.isAccessibilitySize {
-                ForEach(session.cameras) { camera in
-                    GridRow { cameraButton(camera) }
+            .background { LumaBackground() }
+            .navigationTitle("Dashboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Add dashboard", systemImage: "plus") { editor = DashboardEditorRoute() }
+                        .accessibilityIdentifier("dashboard.add")
                 }
-            } else {
-                GridRow {
-                    ForEach(session.cameras.prefix(2)) { camera in cameraButton(camera) }
-                }
-                if session.cameras.count > 2 {
-                    GridRow {
-                        ForEach(session.cameras.dropFirst(2)) { camera in cameraButton(camera) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("Dashboard options", systemImage: "ellipsis") {
+                        Button("Reorder dashboards", systemImage: "arrow.up.arrow.down") { showingOrder = true }
+                            .disabled(dashboards.dashboards.count < 2)
                     }
+                    .accessibilityIdentifier("dashboard.options")
                 }
             }
-        }
-        .overlay {
-            if session.isTransitioning || isOpeningCamera {
-                ProgressView("Preparing views…")
-                    .padding(20)
-                    .modifier(GlassPanel(radius: 20))
+            .sheet(item: $editor) { route in
+                DashboardEditorView(store: store, dashboards: dashboards, dashboard: route.dashboard)
             }
-        }
-        .frame(minHeight: session.cameras.isEmpty ? 180 : 0)
-    }
-
-    private func cameraButton(_ camera: DashboardCamera) -> some View {
-        Button { open(camera.configuration) } label: {
-            DashboardCameraTile(camera: camera)
-        }
-        .buttonStyle(.plain)
-        .disabled(isOpeningCamera || session.isTransitioning)
-        .accessibilityIdentifier("dashboard.camera.\(camera.id)")
-    }
-
-    private var pageControls: some View {
-        HStack(spacing: 18) {
-            Button("Previous cameras", systemImage: "chevron.left") { page = max(0, page - 1) }
-                .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
-                .buttonStyle(.glass)
-                .disabled(page == 0 || isOpeningCamera)
-                .accessibilityIdentifier("dashboard.previous")
-            Spacer(minLength: 0)
-            Text(String(format: String(localized: "Page %lld of %lld"), Int64(page + 1), Int64(pageCount)))
-                .font(.subheadline.monospacedDigit())
-                .accessibilityIdentifier("dashboard.page")
-            Spacer(minLength: 0)
-            Button("Next cameras", systemImage: "chevron.right") { page = min(pageCount - 1, page + 1) }
-                .labelStyle(.iconOnly)
-                .frame(minWidth: 44, minHeight: 44)
-                .buttonStyle(.glass)
-                .disabled(page >= pageCount - 1 || isOpeningCamera)
-                .accessibilityIdentifier("dashboard.next")
-        }
-    }
-
-    private func synchronize(forceRestart: Bool = false) {
-        let shouldPlay = isVisible && scenePhase == .active && !showingCamera && !isOpeningCamera
-        session.show(pageCameras, store: store, active: shouldPlay, forceRestart: forceRestart)
-        updateScreenAwake()
-    }
-
-    private func updateScreenAwake() {
-        // A retained, hidden tab can still observe its players retiring. It must
-        // not reset the idle timer while a different tab owns the visible video.
-        guard isVisible, !showingCamera else { return }
-        let shouldKeepAwake = scenePhase == .active && !isOpeningCamera && hasPlayingCamera
-        guard keepsScreenAwake != shouldKeepAwake else { return }
-        keepsScreenAwake = shouldKeepAwake
-        UIApplication.shared.isIdleTimerDisabled = shouldKeepAwake
-    }
-
-    private func releaseScreenAwake() {
-        guard keepsScreenAwake else { return }
-        keepsScreenAwake = false
-        UIApplication.shared.isIdleTimerDisabled = false
-    }
-
-    private func open(_ camera: CameraConfiguration) {
-        guard !isOpeningCamera, isVisible, scenePhase == .active else { return }
-        isOpeningCamera = true
-        releaseScreenAwake()
-        let request = UUID()
-        navigationRequest = request
-        // The destination is not created until all four old decoders finish
-        // shutting down. Merely hiding their views would leave streams running.
-        session.suspend()
-        Task { @MainActor in
-            await session.suspendAndWait()
-            guard navigationRequest == request else { return }
-            guard isVisible, scenePhase == .active else {
-                navigationRequest = nil
-                isOpeningCamera = false
-                synchronize()
-                return
-            }
-            selectedCamera = camera
-            showingCamera = true
-            isOpeningCamera = false
-        }
-    }
-}
-
-private struct DashboardCameraTile: View {
-    let camera: DashboardCamera
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                Color.black
-                if let player = camera.player {
-                    VideoSurface(player: player)
-                    DashboardPlaybackOverlay(player: player)
-                } else {
-                    Image(systemName: "key.slash")
-                        .font(.title2)
-                        .foregroundStyle(.white.opacity(0.8))
+            .sheet(isPresented: $showingOrder) { DashboardOrderView(dashboards: dashboards) }
+            .confirmationDialog("Remove dashboard?", isPresented: Binding(
+                get: { deleting != nil },
+                set: { if !$0 { deleting = nil } }
+            ), titleVisibility: .visible, presenting: deleting) { dashboard in
+                Button("Remove", role: .destructive) {
+                    do { try dashboards.delete(dashboard) }
+                    catch { message = InterfaceMessage(text: error.localizedDescription) }
+                    deleting = nil
                 }
+                Button("Cancel", role: .cancel) { deleting = nil }
+            } message: { _ in
+                Text("Only this dashboard layout will be removed.")
             }
-            .aspectRatio(4 / 3, contentMode: .fit)
-            .clipped()
-            VStack(alignment: .leading, spacing: 5) {
-                Text(camera.configuration.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                if let player = camera.player {
-                    DashboardStatusLabel(player: player)
-                } else {
-                    Text("Connection unavailable")
+            .lumaAlert($message)
+            .task {
+                if let error = dashboards.errorMessage { message = InterfaceMessage(text: error) }
+            }
+        }
+    }
+
+    private func dashboardCard(_ dashboard: DashboardConfiguration) -> some View {
+        let cameras = dashboard.cameras(from: store.cameras)
+        return VStack(alignment: .leading, spacing: 0) {
+            NavigationLink {
+                DashboardViewerView(dashboard: dashboard, store: store)
+            } label: {
+                DashboardMosaic(cameras: Array(cameras.prefix(4)), store: store)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(dashboard.name))
+            .accessibilityHint(Text("Open dashboard"))
+            .accessibilityIdentifier("dashboard.card.\(dashboard.id)")
+            HStack(alignment: .center, spacing: 4) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dashboard.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    Text(cameras.count == 1 ? String(localized: "1 camera") : String(format: String(localized: "%lld cameras"), Int64(cameras.count)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if let failure = camera.failure {
-                        Text(failure)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Menu("Dashboard actions", systemImage: "ellipsis") {
+                    Button("Edit dashboard", systemImage: "pencil") { editor = DashboardEditorRoute(dashboard: dashboard) }
+                    Button("Remove dashboard", systemImage: "trash", role: .destructive) { deleting = dashboard }
+                }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityIdentifier("dashboard.menu.\(dashboard.id)")
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .background(Color(uiColor: .secondarySystemGroupedBackground))
         .clipShape(.rect(cornerRadius: 20))
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(Text("Open live view"))
     }
 }
 
-private struct DashboardPlaybackOverlay: View {
-    let player: CameraPlayer
+private struct DashboardEditorRoute: Identifiable {
+    var dashboard: DashboardConfiguration?
+    var id: String { dashboard?.id.uuidString ?? "new-dashboard" }
+}
 
-    @ViewBuilder
+private struct DashboardMosaic: View {
+    let cameras: [CameraConfiguration]
+    let store: CameraStore
+    private var columnCount: Int { cameras.count == 1 ? 1 : 2 }
+    private var rowCount: Int { cameras.count > 2 ? 2 : 1 }
+
     var body: some View {
-        switch player.state {
-        case .playing:
-            EmptyView()
-        case .connecting, .buffering:
-            ProgressView().tint(.white)
-        case .idle:
+        ZStack {
             Color.black
-            Image(systemName: "pause.circle").font(.title2).foregroundStyle(.white.opacity(0.8))
-        case .failed:
-            Color.black
-            Image(systemName: "video.slash").font(.title2).foregroundStyle(.white.opacity(0.8))
+            if cameras.isEmpty {
+                Image(systemName: "rectangle.split.2x2")
+                    .font(.title2.weight(.light))
+                    .foregroundStyle(.white.opacity(0.35))
+            } else {
+                GeometryReader { geometry in
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columnCount), spacing: 2) {
+                        ForEach(cameras) { camera in
+                            DashboardCameraThumbnail(camera: camera, store: store)
+                                .frame(height: max(0, geometry.size.height - CGFloat(rowCount - 1) * 2) / CGFloat(rowCount))
+                        }
+                    }
+                }
+            }
         }
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipped()
+        .accessibilityHidden(true)
     }
 }
 
-private struct DashboardStatusLabel: View {
-    let player: CameraPlayer
+private struct DashboardCameraThumbnail: View {
+    let camera: CameraConfiguration
+    let store: CameraStore
+    @State private var thumbnail: UIImage?
 
     var body: some View {
-        Label(title, systemImage: symbol)
-            .font(.caption)
-            .foregroundStyle(player.state == .playing ? Color.accentColor : Color.secondary)
-    }
-
-    private var title: String {
-        switch player.state {
-        case .idle: String(localized: "Paused")
-        case .connecting: String(localized: "Connecting")
-        case .buffering: String(localized: "Buffering")
-        case .playing: String(localized: "Live · Muted")
-        case .failed: String(localized: "Connection unavailable")
+        ZStack {
+            Color.black
+            if let thumbnail {
+                Image(uiImage: thumbnail).resizable().scaledToFit()
+            } else {
+                Image(systemName: "video")
+                    .font(.body.weight(.light))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
         }
-    }
-
-    private var symbol: String {
-        switch player.state {
-        case .playing: "speaker.slash"
-        case .connecting, .buffering: "arrow.triangle.2.circlepath"
-        case .failed: "exclamationmark.circle"
-        case .idle: "pause.circle"
+        .clipped()
+        .task(id: DashboardPreviewService.cacheKey(for: camera)) {
+            thumbnail = nil
+            guard let password = try? store.password(for: camera) else { return }
+            let image = await DashboardPreviewService.shared.image(for: camera, password: password)
+            guard !Task.isCancelled else { return }
+            thumbnail = image
         }
     }
 }

@@ -2,6 +2,12 @@ name: Build Luma for iPhone
 
 on:
   workflow_dispatch:
+    inputs:
+      focused_tests:
+        description: Run PTZ and dashboard regressions before packaging
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -36,7 +42,14 @@ jobs:
         run: bash scripts/ci-bootstrap.sh
 
       - name: Run model and interface tests
-        run: bash scripts/ci-test.sh
+        env:
+          FOCUSED_TESTS: ${{ inputs.focused_tests }}
+        run: |
+          if [ "$FOCUSED_TESTS" = 'true' ]; then
+            bash scripts/ci-test-ptz.sh
+          else
+            bash scripts/ci-test.sh
+          fi
 
       - name: Package iPhone IPA
         run: bash scripts/ci-package.sh

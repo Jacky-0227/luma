@@ -8,11 +8,13 @@ struct CameraConnectionView: View {
     @State private var ptzDiscovery: PTZDiscoveryResult?
     @State private var connectionPassword: String?
     @State private var failure: String?
+    @State private var controlDetectionAttempt = 0
 
     var body: some View {
         Group {
             if let player {
-                LiveCameraView(player: player, configuration: configuration, ptz: ptz, ptzDiscovery: ptzDiscovery)
+                LiveCameraView(player: player, configuration: configuration, ptz: ptz,
+                               ptzDiscovery: ptzDiscovery, retryControls: retryControls)
             } else if let failure {
                 ContentUnavailableView {
                     Label("Unable to open camera", systemImage: "video.slash")
@@ -28,10 +30,17 @@ struct CameraConnectionView: View {
         .navigationTitle(configuration.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { if player == nil { preparePlayer() } }
-        .task(id: player != nil) {
+        .task(id: ControlDetectionID(ready: player != nil, attempt: controlDetectionAttempt)) {
             guard player != nil, let connectionPassword else { return }
             await detectControls(password: connectionPassword)
         }
+    }
+
+    private func retryControls() {
+        ptz?.stop()
+        ptz = nil
+        ptzDiscovery = nil
+        controlDetectionAttempt += 1
     }
 
     private func preparePlayer() {
@@ -52,10 +61,12 @@ struct CameraConnectionView: View {
                 // Deterministic UI coverage with no HTTP probe or device account.
                 result = .available(PTZCapabilities(channel: configuration.channel, panTilt: true, zoom: true))
             } else {
-                result = try await PTZDiscovery.shared.detect(configuration: configuration, password: password)
+                result = try await PTZDiscovery.shared.detect(configuration: configuration, password: password,
+                                                            forceRefresh: controlDetectionAttempt > 0)
             }
             #else
-            result = try await PTZDiscovery.shared.detect(configuration: configuration, password: password)
+            result = try await PTZDiscovery.shared.detect(configuration: configuration, password: password,
+                                                        forceRefresh: controlDetectionAttempt > 0)
             #endif
             guard !Task.isCancelled else { return }
             ptzDiscovery = result
@@ -64,7 +75,7 @@ struct CameraConnectionView: View {
                 controls.ptzEnabled = true
                 controls.ptzChannel = capabilities.channel
                 ptz = PTZController(configuration: controls, password: password,
-                                    supportsPanTilt: capabilities.panTilt, supportsZoom: capabilities.zoom)
+                                    capabilities: capabilities)
             }
         } catch is CancellationError {
             return
@@ -75,6 +86,11 @@ struct CameraConnectionView: View {
     }
 }
 
+private struct ControlDetectionID: Hashable {
+    let ready: Bool
+    let attempt: Int
+}
+
 private struct LiveCameraView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -83,6 +99,7 @@ private struct LiveCameraView: View {
     let configuration: CameraConfiguration
     let ptz: PTZController?
     let ptzDiscovery: PTZDiscoveryResult?
+    let retryControls: () -> Void
     @State private var fullscreen = false
     @State private var showingPTZ = false
     @State private var isVisible = false
@@ -166,17 +183,34 @@ private struct LiveCameraView: View {
 
     @ViewBuilder
     private var automaticControlStatus: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            switch ptzDiscovery {
+            case nil:
+                ProgressView("Detecting camera controls…")
+            case .unavailable:
+                Label("The device reports that PTZ controls are disabled or unavailable on this channel.", systemImage: "video")
+                    .font(.footnote).foregroundStyle(.secondary)
+            case .unknown:
+                Label("PTZ detection is unavailable. Check the control port and device account; live view can continue.", systemImage: "info.circle")
+                    .font(.footnote).foregroundStyle(.secondary)
+            case .unsupported:
+                Label("PTZ was detected, but this device's movement method is not supported yet.", systemImage: "move.3d")
+                    .font(.footnote).foregroundStyle(.secondary)
+            case .available:
+                EmptyView()
+            }
+            if canRetryControlDetection {
+                Button("Detect controls again", systemImage: "arrow.clockwise", action: retryControls)
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("ptz.detectAgain")
+            }
+        }
+    }
+
+    private var canRetryControlDetection: Bool {
         switch ptzDiscovery {
-        case nil:
-            ProgressView("Detecting camera controls…")
-        case .unavailable:
-            Label("This device did not report compatible PTZ controls.", systemImage: "video")
-                .font(.footnote).foregroundStyle(.secondary)
-        case .unknown:
-            Label("PTZ detection is unavailable. Check the control port and device account; live view can continue.", systemImage: "info.circle")
-                .font(.footnote).foregroundStyle(.secondary)
-        case .available:
-            EmptyView()
+        case .unknown, .unavailable, .unsupported: true
+        case nil, .available: false
         }
     }
 

@@ -20,7 +20,7 @@ Luma is a local-network camera viewer for **iOS 26 and later**, with native Swif
 
 The app supports **English, Traditional Chinese and Simplified Chinese**. Its Chinese display name is **流光**. This is an early preview: simulator checks do not establish compatibility with every camera or successful installation on a physical iPhone.
 
-**Verified preview build:** source commit `3e14938` passed all 38 automated checks, including two consecutive VLC recordings and replay. The unsigned iPhone IPA passed packaging validation. Physical-camera and sideloading checks remain open.
+Download packages and read the validation scope for each version in [Releases](https://github.com/Jacky-0227/luma/releases). Camera firmware compatibility and physical PTZ movement still require device testing.
 
 ## Interface preview
 
@@ -42,16 +42,18 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 | Available in this preview | Details |
 | --- | --- |
 | Live view | Main/sub streams, sound, full screen, fill/fit and bounded reconnect attempts |
-| Dashboard | Up to four cameras per page, muted sub streams by default |
+| Dashboard | Named groups, camera selection and ordering, one/two-column layouts, snapshot covers; up to four live cameras per page with aspect-fit video |
 | PTZ | Automatically detects supported pan, tilt and zoom controls; separate web control port |
 | Local captures | Snapshots and manual recordings, up to five minutes per recording |
 | Media library | Preview snapshots, replay local recordings, export and confirm deletion |
 | Configuration backup | Import/export JSON without passwords, snapshots or recordings |
 | Appearance and language | Light/dark mode, native Liquid Glass and three localizations |
 
-PTZ requires a device and account that support Hikvision timed ISAPI movement. A hold is limited to two seconds; release or press Stop to stop movement. HTTP controls require Digest authentication, and HTTPS uses system certificate validation.
+PTZ detection reads Hikvision capabilities for each axis and supports timed or continuous ISAPI movement. It never moves a camera to detect it. Luma sends Stop when you release, leave the view, enter the background, or reach a two-second hold limit. Continuous control depends on the camera receiving that command; an unconfirmed stop blocks further movement and offers a retry. HTTP controls require Digest authentication, and HTTPS uses system certificate validation. See [PTZ compatibility](docs/PTZ-compatibility.md).
 
-**Not implemented:** automatic camera discovery, PTZ presets, two-way talk, camera SD-card/NVR recording search and playback, picture in picture, widgets, shortcuts and custom dashboard layouts. Playback in the media library refers to recordings made by Luma.
+**Not implemented:** automatic camera discovery, PTZ presets, two-way talk, camera SD-card/NVR recording search and playback, picture in picture, widgets and shortcuts. Playback in the media library refers to recordings made by Luma.
+
+Use **Dashboard → +** to name a group, choose cameras and arrange their order. The first four cameras form its cover. Open a group for live views; all tiles preserve the source aspect ratio and use black bars when needed. Covers use small in-memory device snapshots, so devices without a compatible snapshot endpoint show a placeholder. Dashboard layouts stay on this iPhone and are not included in camera configuration exports.
 
 ## Local by design
 
@@ -64,7 +66,7 @@ PTZ requires a device and account that support Hikvision timed ISAPI movement. A
 ## Install on an iPhone
 
 1. Use an iPhone running iOS 26 or later.
-2. Obtain `Luma-unsigned.ipa` from a successful **Build Luma for iPhone** Actions run. Extract the downloaded artifact ZIP first.
+2. Obtain `Luma-unsigned.ipa` from [Releases](https://github.com/Jacky-0227/luma/releases), or extract it from a successful Actions artifact ZIP.
 3. On Windows, connect and unlock the iPhone, trust the computer, then open the IPA in [Sideloadly](https://sideloadly.io/).
 4. Sign and install with an Apple account locally. Follow the iPhone's prompts for developer trust and Developer Mode.
 5. Open Luma, allow Local Network access, connect to the camera's Wi-Fi network, and enter the device address and credentials in the app.

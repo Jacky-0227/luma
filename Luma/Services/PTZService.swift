@@ -8,38 +8,44 @@ struct PTZCommand: Equatable, Sendable {
     let pan: Int
     let tilt: Int
     let zoom: Int
+    let mode: PTZMovementMode
     static let durationMilliseconds = 500
-    static let stop = PTZCommand(pan: 0, tilt: 0, zoom: 0)
+    static let stop = PTZCommand(pan: 0, tilt: 0, zoom: 0, mode: .continuous)
 
-    init(pan: Int, tilt: Int, zoom: Int) {
+    init(pan: Int, tilt: Int, zoom: Int, mode: PTZMovementMode = .momentary) {
         self.pan = min(100, max(-100, pan))
         self.tilt = min(100, max(-100, tilt))
         self.zoom = min(100, max(-100, zoom))
+        self.mode = mode
     }
 
-    init(direction: PTZDirection) {
+    init(direction: PTZDirection, mode: PTZMovementMode = .momentary) {
         let speed = 30
         switch direction {
-        case .up: self.init(pan: 0, tilt: speed, zoom: 0)
-        case .down: self.init(pan: 0, tilt: -speed, zoom: 0)
-        case .left: self.init(pan: -speed, tilt: 0, zoom: 0)
-        case .right: self.init(pan: speed, tilt: 0, zoom: 0)
-        case .upLeft: self.init(pan: -speed, tilt: speed, zoom: 0)
-        case .upRight: self.init(pan: speed, tilt: speed, zoom: 0)
-        case .downLeft: self.init(pan: -speed, tilt: -speed, zoom: 0)
-        case .downRight: self.init(pan: speed, tilt: -speed, zoom: 0)
-        case .zoomIn: self.init(pan: 0, tilt: 0, zoom: speed)
-        case .zoomOut: self.init(pan: 0, tilt: 0, zoom: -speed)
+        case .up: self.init(pan: 0, tilt: speed, zoom: 0, mode: mode)
+        case .down: self.init(pan: 0, tilt: -speed, zoom: 0, mode: mode)
+        case .left: self.init(pan: -speed, tilt: 0, zoom: 0, mode: mode)
+        case .right: self.init(pan: speed, tilt: 0, zoom: 0, mode: mode)
+        case .upLeft: self.init(pan: -speed, tilt: speed, zoom: 0, mode: mode)
+        case .upRight: self.init(pan: speed, tilt: speed, zoom: 0, mode: mode)
+        case .downLeft: self.init(pan: -speed, tilt: -speed, zoom: 0, mode: mode)
+        case .downRight: self.init(pan: speed, tilt: -speed, zoom: 0, mode: mode)
+        case .zoomIn: self.init(pan: 0, tilt: 0, zoom: speed, mode: mode)
+        case .zoomOut: self.init(pan: 0, tilt: 0, zoom: -speed, mode: mode)
         }
     }
 
     var isStop: Bool { pan == 0 && tilt == 0 && zoom == 0 }
-    var resource: String { isStop ? "continuous" : "momentary" }
+    var resource: String { mode == .continuous ? "continuous" : "momentary" }
+
+    static func stop(mode: PTZMovementMode) -> PTZCommand {
+        PTZCommand(pan: 0, tilt: 0, zoom: 0, mode: mode)
+    }
 
     var xml: Data {
         // Vendor PTZ Service Specification 2.0, sections 4.8 and 4.9.
         // A lost connection cannot leave a momentary movement running indefinitely.
-        let momentary = isStop ? "" : "<Momentary><duration>\(Self.durationMilliseconds)</duration></Momentary>"
+        let momentary = mode == .momentary ? "<Momentary><duration>\(Self.durationMilliseconds)</duration></Momentary>" : ""
         return Data("""
         <?xml version="1.0" encoding="UTF-8"?>
         <PTZData version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><pan>\(pan)</pan><tilt>\(tilt)</tilt><zoom>\(zoom)</zoom>\(momentary)</PTZData>
@@ -67,7 +73,8 @@ struct PTZEndpoint: Sendable {
         guard let url = URL(string: "\(scheme)://\(address):\(port)/ISAPI/PTZCtrl/channels/\(channel)/\(command.resource)") else {
             throw PTZError.invalidSettings
         }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData,
+                                 timeoutInterval: PTZRequestPolicy.timeout(for: command))
         request.httpMethod = "PUT"
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
@@ -83,6 +90,25 @@ struct PTZEndpoint: Sendable {
     }
 }
 
+enum PTZRequestPolicy {
+    // A move must not occupy the FIFO for the former five-second resource
+    // deadline. Failure still requires Stop because acceptance is uncertain.
+    static func timeout(for command: PTZCommand) -> TimeInterval { command.isStop ? 2 : 1.5 }
+
+    static func sessionConfiguration(for command: PTZCommand) -> URLSessionConfiguration {
+        let settings = URLSessionConfiguration.ephemeral
+        settings.urlCredentialStorage = nil
+        settings.urlCache = nil
+        settings.httpCookieStorage = nil
+        settings.httpShouldSetCookies = false
+        settings.waitsForConnectivity = false
+        settings.timeoutIntervalForRequest = timeout(for: command)
+        settings.timeoutIntervalForResource = timeout(for: command)
+        settings.httpMaximumConnectionsPerHost = 1
+        return settings
+    }
+}
+
 @MainActor
 protocol PTZTransport {
     func send(_ command: PTZCommand) async throws
@@ -92,31 +118,30 @@ protocol PTZTransport {
 final class PTZService: PTZTransport {
     private let configuration: CameraConfiguration
     private let password: String
-    private var session: URLSession?
+    private var moveSession: URLSession?
+    private var stopSession: URLSession?
 
     init(configuration: CameraConfiguration, password: String) {
         self.configuration = configuration
         self.password = password
     }
 
-    deinit { session?.finishTasksAndInvalidate() }
+    deinit {
+        moveSession?.finishTasksAndInvalidate()
+        stopSession?.finishTasksAndInvalidate()
+    }
 
     func send(_ command: PTZCommand) async throws {
         let endpoint: PTZEndpoint
         do { endpoint = try PTZEndpoint(configuration: configuration) }
         catch { throw PTZError.invalidSettings }
+        var session = command.isStop ? stopSession : moveSession
         if session == nil {
-            let settings = URLSessionConfiguration.ephemeral
-            settings.urlCredentialStorage = nil
-            settings.urlCache = nil
-            settings.httpCookieStorage = nil
-            settings.httpShouldSetCookies = false
-            settings.waitsForConnectivity = false
-            settings.timeoutIntervalForRequest = 3
-            settings.timeoutIntervalForResource = 5
-            settings.httpMaximumConnectionsPerHost = 1
+            let settings = PTZRequestPolicy.sessionConfiguration(for: command)
             let authentication = PTZAuthenticationDelegate(endpoint: endpoint, username: configuration.username, password: password)
             session = URLSession(configuration: settings, delegate: authentication, delegateQueue: nil)
+            if command.isStop { stopSession = session }
+            else { moveSession = session }
         }
         guard let session else { throw PTZError.connectionFailed }
         do {
@@ -205,16 +230,17 @@ private final class PTZStatusParser: NSObject, XMLParserDelegate {
 }
 
 enum PTZError: LocalizedError {
-    case disabled, invalidSettings, connectionFailed, permissionDenied, unsupported, invalidResponse, commandRejected
+    case disabled, invalidSettings, connectionFailed, permissionDenied, unsupported, invalidResponse, commandRejected, stopUnconfirmed
     var errorDescription: String? {
         switch self {
         case .disabled: String(localized: "Enable PTZ control in this camera's settings first.")
         case .invalidSettings: String(localized: "Check the PTZ control address, port, and channel.")
         case .connectionFailed: String(localized: "PTZ could not connect. Check the control port, local network access, and device account. HTTP requires Digest authentication; HTTPS requires a trusted certificate.")
         case .permissionDenied: String(localized: "The device rejected PTZ access. Check the device account and its PTZ permission.")
-        case .unsupported: String(localized: "This device or channel does not support timed ISAPI PTZ control.")
+        case .unsupported: String(localized: "This device or channel does not support this ISAPI PTZ command.")
         case .invalidResponse: String(localized: "The PTZ response was not valid. Check the control port and device settings.")
-        case .commandRejected: String(localized: "The camera rejected this PTZ command. Check timed PTZ support, the control channel, and account permissions.")
+        case .commandRejected: String(localized: "The camera rejected this PTZ command. Check PTZ support, the control channel, and account permissions.")
+        case .stopUnconfirmed: String(localized: "The camera has not confirmed stopping. Tap Stop to retry before moving again.")
         }
     }
 }

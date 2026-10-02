@@ -53,6 +53,23 @@ final class PTZTests: XCTestCase {
         XCTAssertTrue(PTZCommand.stop.isStop)
     }
 
+    func testContinuousRequestAndMomentaryOnlyStopUseCorrectResourcesAndDeadlines() throws {
+        let endpoint = try PTZEndpoint(configuration: CameraConfiguration(name: "PTZ", host: "camera.local", ptzEnabled: true))
+        let move = PTZCommand(direction: .left, mode: .continuous)
+        let request = try endpoint.request(for: move)
+        XCTAssertEqual(request.url?.lastPathComponent, "continuous")
+        XCTAssertFalse(String(decoding: try XCTUnwrap(request.httpBody), as: UTF8.self).contains("Momentary"))
+        XCTAssertEqual(request.timeoutInterval, 1.5)
+        XCTAssertEqual(PTZRequestPolicy.sessionConfiguration(for: move).timeoutIntervalForResource, 1.5)
+        let stop = PTZCommand.stop(mode: .momentary)
+        let stopRequest = try endpoint.request(for: stop)
+        XCTAssertEqual(stopRequest.url?.lastPathComponent, "momentary")
+        let xml = String(decoding: try XCTUnwrap(stopRequest.httpBody), as: UTF8.self)
+        XCTAssertTrue(xml.contains("<pan>0</pan><tilt>0</tilt><zoom>0</zoom>"))
+        XCTAssertTrue(xml.contains("<Momentary><duration>500</duration></Momentary>"))
+        XCTAssertEqual(PTZRequestPolicy.sessionConfiguration(for: stop).timeoutIntervalForResource, 2)
+    }
+
     func testAuthenticationIsBoundToEndpointAndSecureMethod() throws {
         let http = try PTZEndpoint(configuration: CameraConfiguration(name: "PTZ", host: "camera.local", ptzEnabled: true))
         XCTAssertTrue(http.permitsCredentials(host: "CAMERA.local", port: 80, scheme: "http", method: NSURLAuthenticationMethodHTTPDigest, isProxy: false))
@@ -133,6 +150,148 @@ final class PTZTests: XCTestCase {
         XCTAssertNotNil(controller.errorMessage)
         XCTAssertFalse(controller.errorMessage?.contains("private-password") ?? true)
     }
+
+    @MainActor
+    func testContinuousHoldSendsOneMoveThenScheduledStopWithoutRefreshPulses() async throws {
+        let transport = RecordingPTZTransport()
+        let controller = PTZController(enabled: true, transport: transport, capabilities: Self.continuousCapabilities,
+                                       holdLimit: .milliseconds(650))
+        let started = ContinuousClock.now
+        controller.press(.up)
+        await transport.waitForCount(2)
+        XCTAssertGreaterThanOrEqual(started.duration(to: ContinuousClock.now), .milliseconds(600))
+        XCTAssertEqual(transport.commands, [PTZCommand(direction: .up, mode: .continuous), .stop],
+                       "Continuous movement must not be repeated using the momentary refresh timer.")
+        XCTAssertFalse(controller.isMoving)
+        XCTAssertFalse(controller.isStopping)
+    }
+
+    @MainActor
+    func testDeadlineQueuesStopBehindAnUnacknowledgedMoveAndBlocksNewMoves() async throws {
+        let transport = RecordingPTZTransport(blockFirstMove: true)
+        let controller = PTZController(enabled: true, transport: transport, capabilities: Self.continuousCapabilities,
+                                       holdLimit: .milliseconds(20))
+        controller.press(.left)
+        await transport.waitForCount(1)
+        try await waitUntil { controller.isStopping }
+        controller.press(.right)
+        XCTAssertEqual(transport.commands, [PTZCommand(direction: .left, mode: .continuous)])
+        XCTAssertFalse(controller.isMoving)
+        transport.releaseMove()
+        await transport.waitForCount(2)
+        XCTAssertEqual(transport.commands.last, .stop, "Stop must follow the unresolved move, never race ahead of it.")
+        XCTAssertFalse(controller.isStopping)
+    }
+
+    @MainActor
+    func testFailedStopRetriesAreBoundedAndRequireExplicitConfirmedRetryBeforeMoving() async throws {
+        let transport = RecordingPTZTransport(stopFailures: 3)
+        let controller = PTZController(enabled: true, transport: transport, capabilities: Self.continuousCapabilities,
+                                       stopRetryDelay: .milliseconds(1))
+        controller.press(.left)
+        await transport.waitForCount(1)
+        controller.stop()
+        await transport.waitForCount(4)
+        XCTAssertEqual(transport.commands.filter(\.isStop).count, 3)
+        XCTAssertTrue(controller.isStopping)
+        XCTAssertNotNil(controller.errorMessage)
+        controller.press(.right)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(transport.commands.count, 4, "Unconfirmed Stop must neither restart movement nor retry forever.")
+        controller.stop()
+        await transport.waitForCount(5)
+        XCTAssertFalse(controller.isStopping)
+        XCTAssertNil(controller.errorMessage)
+        controller.press(.right)
+        await transport.waitForCount(6)
+        XCTAssertEqual(transport.commands.last, PTZCommand(direction: .right, mode: .continuous))
+        controller.stop()
+        await transport.waitForCount(7)
+    }
+
+    @MainActor
+    func testStopAcknowledgmentAfterRetriesClearsStoppingState() async throws {
+        let transport = RecordingPTZTransport(stopFailures: 2)
+        let controller = PTZController(enabled: true, transport: transport, capabilities: Self.continuousCapabilities,
+                                       stopRetryDelay: .milliseconds(1))
+        controller.press(.up)
+        await transport.waitForCount(1)
+        controller.stop()
+        await transport.waitForCount(4)
+        XCTAssertFalse(controller.isStopping)
+        XCTAssertNil(controller.errorMessage)
+        XCTAssertEqual(transport.commands.filter(\.isStop).count, 3)
+    }
+
+    @MainActor
+    func testSingleAndMixedAxisModesRejectUnsafeDiagonalsAndChoosePerAxisCommands() async throws {
+        let transport = RecordingPTZTransport()
+        let capabilities = PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .momentary, zoomMode: nil)
+        let controller = PTZController(enabled: true, transport: transport, capabilities: capabilities)
+        XCTAssertTrue(controller.supports(.left))
+        XCTAssertTrue(controller.supports(.up))
+        XCTAssertFalse(controller.supports(.upLeft))
+        XCTAssertFalse(controller.supports(.zoomIn))
+        XCTAssertTrue(controller.usesContinuousControl)
+        controller.press(.upLeft)
+        XCTAssertTrue(transport.commands.isEmpty)
+        controller.press(.left)
+        await transport.waitForCount(1)
+        XCTAssertEqual(transport.commands.last?.mode, .continuous)
+        controller.stop()
+        await transport.waitForCount(2)
+        XCTAssertEqual(transport.commands.last, .stop, "Mixed devices with continuous support use its zero-axis stop.")
+        controller.press(.up)
+        await transport.waitForCount(3)
+        XCTAssertEqual(transport.commands.last?.mode, .momentary)
+        controller.stop()
+        await transport.waitForCount(4)
+        XCTAssertEqual(transport.commands.last, .stop)
+        let panOnly = PTZController(enabled: true, transport: RecordingPTZTransport(),
+                                    capabilities: PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: nil, zoomMode: nil))
+        XCTAssertTrue(panOnly.supportsPanTilt)
+        XCTAssertFalse(panOnly.supports(.up))
+        XCTAssertFalse(panOnly.supports(.downRight))
+    }
+
+    @MainActor
+    func testMomentaryOnlyDeviceUsesTimedZeroCommandToStop() async throws {
+        let transport = RecordingPTZTransport()
+        let capabilities = PTZCapabilities(channel: 1, panMode: .momentary, tiltMode: .momentary, zoomMode: nil,
+                                           supportsContinuousStop: false)
+        let controller = PTZController(enabled: true, transport: transport, capabilities: capabilities)
+        controller.press(.left)
+        await transport.waitForCount(1)
+        controller.stop()
+        await transport.waitForCount(2)
+        XCTAssertEqual(transport.commands.last, .stop(mode: .momentary))
+        XCTAssertFalse(controller.usesContinuousControl)
+    }
+
+    @MainActor
+    func testDroppingPresentationDoesNotLoseContinuousStopDeadline() async throws {
+        let transport = RecordingPTZTransport()
+        var controller: PTZController? = PTZController(enabled: true, transport: transport, capabilities: Self.continuousCapabilities,
+                                                     holdLimit: .milliseconds(40))
+        weak var owner = controller
+        controller?.press(.left)
+        await transport.waitForCount(1)
+        controller = nil
+        await transport.waitForCount(2)
+        XCTAssertEqual(transport.commands.last, .stop)
+        try await waitUntil { owner == nil }
+    }
+
+    private static var continuousCapabilities: PTZCapabilities {
+        PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: .continuous)
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(condition(), "PTZ state did not reach the expected value within three seconds.")
+    }
 }
 
 @MainActor
@@ -142,10 +301,12 @@ private final class RecordingPTZTransport: PTZTransport {
     private var waiters: [(id: UUID, count: Int, continuation: CheckedContinuation<Bool, Never>)] = []
     private let blockFirstMove: Bool
     private let failFirstMove: Bool
+    private var stopFailures: Int
 
-    init(blockFirstMove: Bool = false, failFirstMove: Bool = false) {
+    init(blockFirstMove: Bool = false, failFirstMove: Bool = false, stopFailures: Int = 0) {
         self.blockFirstMove = blockFirstMove
         self.failFirstMove = failFirstMove
+        self.stopFailures = stopFailures
     }
 
     func send(_ command: PTZCommand) async throws {
@@ -158,6 +319,10 @@ private final class RecordingPTZTransport: PTZTransport {
         } else { resumeWaiters() }
         if commands.count == 1, failFirstMove {
             throw NSError(domain: "private-password", code: 1)
+        }
+        if command.isStop, stopFailures > 0 {
+            stopFailures -= 1
+            throw NSError(domain: "private-stop-diagnostic", code: 1)
         }
     }
 

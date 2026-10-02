@@ -2,6 +2,12 @@ name: Build Luma for device testing
 
 on:
   workflow_dispatch:
+    inputs:
+      ptz_tests:
+        description: Run focused PTZ and dashboard regressions before packaging
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -14,7 +20,7 @@ jobs:
   build:
     name: Compile and validate an iPhone test package
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       COCOAPODS_DISABLE_STATS: 'true'
@@ -30,8 +36,16 @@ jobs:
       - name: Prepare pinned build tools and dependency
         run: bash scripts/ci-bootstrap.sh
 
+      - name: Run focused PTZ and dashboard regression tests
+        if: ${{ inputs.ptz_tests }}
+        run: bash scripts/ci-test-ptz.sh
+
       - name: Compile and validate iPhone IPA
         run: bash scripts/ci-package.sh
+
+      - name: Collect focused PTZ test diagnostics
+        if: ${{ always() && inputs.ptz_tests }}
+        run: bash scripts/ci-diagnostics.sh
 
       - name: Upload device test package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -54,10 +68,17 @@ jobs:
           retention-days: 1
 
       - name: Describe validation scope
+        env:
+          PTZ_TESTS: ${{ inputs.ptz_tests }}
         run: |
           {
             echo '### Device test package'
             echo 'Release compilation and IPA structure validation passed.'
-            echo 'This manual workflow does not run simulator tests. Install locally to verify camera compatibility and performance.'
+            if [ "$PTZ_TESTS" = 'true' ]; then
+              echo 'Focused PTZ and dashboard regression tests passed on an iOS simulator.'
+            else
+              echo 'Simulator tests were not requested for this device trial.'
+            fi
+            echo 'Install locally to verify camera compatibility and performance.'
             echo 'The unsigned IPA must be signed locally before installation.'
           } >> "$GITHUB_STEP_SUMMARY"
