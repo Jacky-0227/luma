@@ -1,10 +1,52 @@
-# Luma · 流光
+<p align="center">
+  <img src="Luma/Assets.xcassets/BrandMark.imageset/BrandMark.png" width="144" alt="Luma 流光圖示">
+</p>
 
-[English](README.md) · [简体中文](README.zh-Hans.md) · [繁體中文](README.zh-Hant.md)
+<h1 align="center">Luma · 流光</h1>
+
+<p align="center">直接連接，安心看見。畫面與密碼留在本機。</p>
+
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="README.zh-Hans.md">简体中文</a> ·
+  <a href="README.zh-Hant.md">繁體中文</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/badge-ios.svg" alt="iOS 26 以上">
+  <img src="docs/assets/badge-swiftui.svg" alt="SwiftUI Liquid Glass">
+  <img src="docs/assets/badge-local.svg" alt="區域網路連接">
+  <img src="docs/assets/badge-languages.svg" alt="支援三種語言">
+</p>
+
+<p align="center">
+  <a href="#介面預覽">介面預覽</a> ·
+  <a href="#功能">功能</a> ·
+  <a href="#在-windows-安裝到-iphone">安裝</a> ·
+  <a href="#開發與建置環境">建置</a>
+</p>
 
 Luma 是一款面向 **iOS 26 及以上版本**的區域網路攝影機檢視器，使用 SwiftUI 原生 Liquid Glass 介面和 MobileVLCKit 播放 RTSP 串流。App 直接連接同一網路上的攝影機或錄影機，支援繁體中文、簡體中文及英文。
 
-目前為開發預覽版，完整自動化測試及真機相容性仍待驗證。
+目前為開發預覽版。原始碼提交 `3e14938` 已通過全部 38 項自動化檢查，包括連續兩次 VLC 錄影與回放，未簽名 iPhone IPA 亦通過封裝驗證。真機安裝與攝影機相容性仍待驗證。
+
+## 介面預覽
+
+<p align="center">
+  <img src="docs/assets/home-zh-Hant.png" width="220" alt="Luma 繁體中文首頁">
+  <img src="docs/assets/camera-editor-zh-Hans.png" width="220" alt="Luma 簡體中文新增設備頁">
+  <img src="docs/assets/settings-en.png" width="220" alt="Luma 英文設定頁">
+</p>
+
+<p align="center">繁體中文 · 簡體中文 · English</p>
+
+以上為 iOS 26 模擬器的真實介面截圖，不含真實攝影機畫面。
+
+<details>
+<summary>查看雲台控制 · 離線示範</summary>
+<p align="center"><img src="docs/assets/ptz-en.png" width="300" alt="八方向、停止與變焦雲台控制"></p>
+測試設備刻意保持離線，圖片用於展示控制介面，不代表已連接真實攝影機。
+</details>
 
 ## 功能
 
@@ -94,7 +136,7 @@ gh run download RUN_ID --name Luma-test-report --dir build/report
 
 工作流程依序檢查資源、準備固定版本工具、執行 iOS 26 模擬器測試，再建立 arm64 真機 Release。只有測試與封裝檢查成功才會提供 IPA。產物包含未簽名安裝包與精簡診斷資料，保留一天；單次工作流程最多執行 35 分鐘。
 
-目前專案收錄 38 項自動化測試，涵蓋模型、設定備份、雲台指令、媒體儲存、真實 VLC 元件擷取／回放及三語介面流程。**尚未確認 38 項測試全部通過，也尚未完成真機驗收**；請查看每次 Actions 執行結果。
+原始碼提交 `3e14938` 的 38 項自動化測試全部通過，涵蓋模型、設定備份、雲台指令、媒體儲存、真實 VLC 元件擷取／回放及三語介面流程。後續版本請查看對應 Actions 執行結果；真機驗收仍待完成。
 
 ## 在 Windows 安裝到 iPhone
 

@@ -1,10 +1,41 @@
-# Luma · A clearer view of home
-
-**English** · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
+<p align="center">
+  <img src="Luma/Assets.xcassets/BrandMark.imageset/BrandMark.png" width="144" alt="Luma app icon">
+</p>
+<h1 align="center">Luma · 流光</h1>
+<p align="center"><strong>A clearer view of home.</strong><br>Direct to your cameras. Private on your iPhone.</p>
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-Hant.md">繁體中文</a> · <a href="README.zh-Hans.md">简体中文</a>
+</p>
+<p align="center">
+  <img src="docs/assets/badge-ios.svg" alt="iOS 26 and later">
+  <img src="docs/assets/badge-swiftui.svg" alt="SwiftUI Liquid Glass">
+  <img src="docs/assets/badge-local.svg" alt="Local network only">
+  <img src="docs/assets/badge-languages.svg" alt="English, Traditional Chinese, Simplified Chinese">
+</p>
+<p align="center">
+  <a href="#interface-preview">Preview</a> · <a href="#features">Features</a> · <a href="#install-on-an-iphone">Install</a> · <a href="#build-and-validate">Build</a>
+</p>
 
 Luma is a local-network camera viewer for **iOS 26 and later**, with native SwiftUI Liquid Glass controls. It connects directly to Hikvision cameras or recorders using RTSP for video and ISAPI for supported PTZ controls.
 
 The app supports **English, Traditional Chinese and Simplified Chinese**. Its Chinese display name is **流光**. This is an early preview: simulator checks do not establish compatibility with every camera or successful installation on a physical iPhone.
+
+**Verified preview build:** source commit `3e14938` passed all 38 automated checks, including two consecutive VLC recordings and replay. The unsigned iPhone IPA passed packaging validation. Physical-camera and sideloading checks remain open.
+
+## Interface preview
+
+<p align="center">
+  <img src="docs/assets/home-zh-Hant.png" width="220" alt="Traditional Chinese home screen in dark mode">
+  <img src="docs/assets/camera-editor-zh-Hans.png" width="220" alt="Simplified Chinese camera editor in dark mode">
+  <img src="docs/assets/settings-en.png" width="220" alt="English settings screen in light mode">
+</p>
+<p align="center"><sub>Actual iOS 26 simulator screenshots · No real camera footage or personal device data</sub></p>
+
+<details>
+<summary>PTZ controls · offline demonstration</summary>
+<p align="center"><img src="docs/assets/ptz-en.png" width="300" alt="Eight-direction PTZ controls with stop and zoom"></p>
+The test camera is intentionally offline. This screenshot demonstrates the controls, not a successful connection to a real camera.
+</details>
 
 ## Features
 

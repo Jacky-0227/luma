@@ -1,10 +1,49 @@
-# Luma · 流光
+<p align="center">
+  <img src="Luma/Assets.xcassets/BrandMark.imageset/BrandMark.png" width="144" alt="Luma 标志">
+</p>
 
-[English](README.md) · [繁體中文](README.zh-Hant.md) · **简体中文**
+<h1 align="center">Luma · 流光</h1>
+
+<p align="center">家的画面，留在自己的局域网。</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-Hant.md">繁體中文</a> · <strong>简体中文</strong>
+</p>
+
+<p align="center">
+  <img src="docs/assets/badge-ios.svg" alt="iOS 26 及以上">
+  <img src="docs/assets/badge-swiftui.svg" alt="SwiftUI 与 Liquid Glass">
+  <img src="docs/assets/badge-local.svg" alt="局域网使用">
+  <img src="docs/assets/badge-languages.svg" alt="三种界面语言">
+</p>
+
+<p align="center">
+  <a href="#preview">界面预览</a> · <a href="#features">功能</a> · <a href="#installation">安装</a> · <a href="#build">构建</a>
+</p>
 
 Luma 是面向 **iOS 26 及以上**的局域网摄像头查看器，使用 SwiftUI 原生 Liquid Glass 界面，通过 RTSP 播放海康威视设备的视频，通过 ISAPI 控制兼容设备的云台。应用提供繁体中文、简体中文和英文界面。
 
-**当前为源码预览版。** 功能已进入实现和自动化验证阶段，仍需在实际 iPhone 和摄像头上验证安装、播放、云台、录像及性能。请查看对应提交的 Actions 结果了解构建状态；本说明不代表所有测试已通过，也不保证兼容所有海康型号。
+**当前为开发预览版。** 源码提交 `3e14938` 已通过全部 38 项自动化检查，包括连续两次 VLC 录像及回放，未签名 iPhone IPA 也已通过打包校验。实际 iPhone 安装、摄像头兼容性、云台与性能仍待真机验证。
+
+<a id="preview"></a>
+
+## 界面预览
+
+以下为 iOS 26 模拟器实际运行截屏，依次展示繁体中文、简体中文和英文界面，不含真实摄像头画面。
+
+<p align="center">
+  <img src="docs/assets/home-zh-Hant.png" width="220" alt="Luma 繁体中文首页，iOS 26 模拟器截屏">
+  <img src="docs/assets/camera-editor-zh-Hans.png" width="220" alt="Luma 简体中文设备添加页，iOS 26 模拟器截屏">
+  <img src="docs/assets/settings-en.png" width="220" alt="Luma 英文设置页，iOS 26 模拟器截屏">
+</p>
+
+<a id="features"></a>
+
+<details>
+<summary>查看云台控制 · 离线演示</summary>
+<p align="center"><img src="docs/assets/ptz-en.png" width="300" alt="八方向、停止与变焦云台控制"></p>
+测试设备刻意保持离线，图片用于展示控制界面，不代表已连接真实摄像头。
+</details>
 
 ## 功能范围
 
@@ -49,6 +88,8 @@ Luma 是面向 **iOS 26 及以上**的局域网摄像头查看器，使用 Swift
 - 分享导出由用户选择目标应用。导出后的文件由所选目标管理。
 
 GitHub Actions 只负责构建源码，不需要摄像头地址、视频、密码或 Apple 登录凭据。正常观看时，Windows 电脑和构建运行器不参与视频传输。使用 GitHub 或 Apple 账号是构建和签名流程的一部分，不是 Luma 的在线服务。
+
+<a id="build"></a>
 
 ## 开发环境
 
@@ -113,6 +154,8 @@ open Luma.xcworkspace
 ```
 
 脚本会准备图标、生成工程并安装固定依赖。开发时打开生成的 workspace；安装到自己的设备需要在 Xcode 或签名工具中配置自己的开发团队。
+
+<a id="installation"></a>
 
 ## 从 Windows 安装到 iPhone
 
