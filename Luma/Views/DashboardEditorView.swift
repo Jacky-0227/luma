@@ -112,7 +112,6 @@ struct DashboardEditorView: View {
                 .disabled(selectedCameras.last?.id == camera.id)
                 .accessibilityIdentifier("dashboard.move-down.\(camera.id)")
         }
-        .accessibilityIdentifier("dashboard.order.\(camera.id)")
     }
 
     private func toggle(_ camera: CameraConfiguration) {

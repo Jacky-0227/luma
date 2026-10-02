@@ -98,11 +98,29 @@ final class DashboardUITests: XCTestCase {
     }
 
     @MainActor
-    private func reveal(_ element: XCUIElement, app: XCUIApplication, towardTop: Bool = false) {
+    private func reveal(
+        _ element: XCUIElement,
+        app: XCUIApplication,
+        towardTop: Bool = false,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        // SwiftUI Form is backed by a collection view on iOS 26. Send the
+        // gesture to its scroll surface so a downward swipe cannot dismiss
+        // the editor sheet through its header or another app-level surface.
+        let surfaces = [app.collectionViews.firstMatch, app.tables.firstMatch, app.scrollViews.firstMatch]
+        let scrollSurface = surfaces.first(where: { $0.exists && $0.isHittable }) ?? app
         for _ in 0..<5 where !element.isHittable {
-            if towardTop { app.swipeDown() } else { app.swipeUp() }
+            if towardTop { scrollSurface.swipeDown() } else { scrollSurface.swipeUp() }
         }
-        XCTAssertTrue(element.isHittable)
+        if !element.isHittable {
+            capture("dashboard-missing-control")
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "dashboard-missing-control-hierarchy.txt"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertTrue(element.isHittable, "Control is not reachable: \(element)", file: file, line: line)
     }
 
     @MainActor
