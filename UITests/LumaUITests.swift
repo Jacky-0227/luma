@@ -39,7 +39,7 @@ final class LumaUITests: XCTestCase {
 
     @MainActor
     func testCameraValidationAndSave() throws {
-        let app = launch(language: "en")
+        let app = launch(language: "en", automaticPTZ: true)
         XCTAssertTrue(app.buttons["camera.add"].waitForExistence(timeout: 15))
         app.buttons["camera.add"].tap()
         let save = app.buttons["camera.save"]
@@ -53,22 +53,11 @@ final class LumaUITests: XCTestCase {
         let address = app.textFields["camera.host"]
         address.tap()
         address.typeText("127.0.0.1")
-        let ptzSwitch = app.switches["camera.ptz.enabled"]
-        for _ in 0..<3 where !ptzSwitch.isHittable { app.swipeUp() }
-        XCTAssertTrue(ptzSwitch.isHittable)
-        captureInterface("debug-camera-ptz-before-toggle", app: app)
-        // SwiftUI can expose the whole labeled Form row as the switch's
-        // accessibility frame. Its center is not necessarily the native track.
-        // Tap inside the trailing control, using the element's current frame.
-        ptzSwitch.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
-            .withOffset(CGVector(dx: -20, dy: 0)).tap()
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: ptzSwitch)
-        let enabledResult = XCTWaiter.wait(for: [enabled], timeout: 5)
-        if enabledResult != .completed {
-            captureInterface("debug-camera-ptz-toggle-failed", app: app)
-        }
-        XCTAssertEqual(enabledResult, .completed, "PTZ must be enabled before saving the camera.")
-        capture("en-04a-camera-ptz-enabled")
+        let automaticPTZ = app.descendants(matching: .any).matching(identifier: "camera.ptz.automatic").firstMatch
+        for _ in 0..<3 where !automaticPTZ.isHittable { app.swipeUp() }
+        XCTAssertTrue(automaticPTZ.exists)
+        XCTAssertFalse(app.switches["camera.ptz.enabled"].exists)
+        capture("en-04a-camera-ptz-automatic")
         save.tap()
         let savedCamera = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "camera.card.")).firstMatch
         XCTAssertTrue(savedCamera.waitForExistence(timeout: 5))
@@ -100,16 +89,54 @@ final class LumaUITests: XCTestCase {
     }
 
     @MainActor
+    func testRepeatedNavigationWhileCameraIsConnecting() throws {
+        let app = launch(language: "en")
+        XCTAssertTrue(app.buttons["camera.add"].waitForExistence(timeout: 15))
+        app.buttons["camera.add"].tap()
+        let name = app.textFields["camera.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        name.tap()
+        name.typeText("Navigation test")
+        let address = app.textFields["camera.host"]
+        address.tap()
+        address.typeText("127.0.0.1")
+        app.buttons["camera.save"].tap()
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "camera.card.")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+
+        // Never wait for a failed connection or use a real camera. Repeatedly
+        // leave an opening stream, then change tabs while it is being retired.
+        // Record simulator interaction time for future comparisons. This metric
+        // includes XCTest synchronization; it is not a device FPS benchmark.
+        let options = XCTMeasureOptions()
+        options.iterationCount = 3
+        measure(metrics: [XCTClockMetric()], options: options) {
+            card.tap()
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "player.status").firstMatch.waitForExistence(timeout: 5))
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
+            app.tabBars.buttons["Dashboard"].tap()
+            XCTAssertTrue(app.navigationBars["Dashboard"].waitForExistence(timeout: 5))
+            app.tabBars.buttons["Library"].tap()
+            XCTAssertTrue(app.navigationBars["Library"].waitForExistence(timeout: 5))
+            app.tabBars.buttons["Cameras"].tap()
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
+        }
+        app.terminate()
+    }
+
+    @MainActor
     private func waitForLabel(_ label: String, on element: XCUIElement) {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed)
     }
 
     @MainActor
-    private func launch(language: String, dark: Bool = false) -> XCUIApplication {
+    private func launch(language: String, dark: Bool = false, automaticPTZ: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(\(language))", "-AppleLocale", language]
         if dark { app.launchArguments.append("--ui-test-dark") }
+        if automaticPTZ { app.launchArguments.append("--ui-test-ptz") }
         app.launch()
         return app
     }

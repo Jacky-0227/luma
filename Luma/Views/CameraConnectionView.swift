@@ -5,12 +5,14 @@ struct CameraConnectionView: View {
     let store: CameraStore
     @State private var player: CameraPlayer?
     @State private var ptz: PTZController?
+    @State private var ptzDiscovery: PTZDiscoveryResult?
+    @State private var connectionPassword: String?
     @State private var failure: String?
 
     var body: some View {
         Group {
             if let player {
-                LiveCameraView(player: player, configuration: configuration, ptz: ptz)
+                LiveCameraView(player: player, configuration: configuration, ptz: ptz, ptzDiscovery: ptzDiscovery)
             } else if let failure {
                 ContentUnavailableView {
                     Label("Unable to open camera", systemImage: "video.slash")
@@ -26,17 +28,50 @@ struct CameraConnectionView: View {
         .navigationTitle(configuration.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { if player == nil { preparePlayer() } }
+        .task(id: player != nil) {
+            guard player != nil, let connectionPassword else { return }
+            await detectControls(password: connectionPassword)
+        }
     }
 
     private func preparePlayer() {
         do {
             let password = try store.password(for: configuration)
-            if configuration.ptzEnabled {
-                ptz = PTZController(configuration: configuration, password: password)
-            }
+            connectionPassword = password
             player = CameraPlayer(configuration: configuration, password: password)
             failure = nil
         } catch { failure = error.localizedDescription }
+    }
+
+    private func detectControls(password: String) async {
+        do {
+            let result: PTZDiscoveryResult
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing"),
+               ProcessInfo.processInfo.arguments.contains("--ui-test-ptz") {
+                // Deterministic UI coverage with no HTTP probe or device account.
+                result = .available(PTZCapabilities(channel: configuration.channel, panTilt: true, zoom: true))
+            } else {
+                result = try await PTZDiscovery.shared.detect(configuration: configuration, password: password)
+            }
+            #else
+            result = try await PTZDiscovery.shared.detect(configuration: configuration, password: password)
+            #endif
+            guard !Task.isCancelled else { return }
+            ptzDiscovery = result
+            if case .available(let capabilities) = result {
+                var controls = configuration
+                controls.ptzEnabled = true
+                controls.ptzChannel = capabilities.channel
+                ptz = PTZController(configuration: controls, password: password,
+                                    supportsPanTilt: capabilities.panTilt, supportsZoom: capabilities.zoom)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            ptzDiscovery = .unknown
+        }
     }
 }
 
@@ -47,6 +82,7 @@ private struct LiveCameraView: View {
     let player: CameraPlayer
     let configuration: CameraConfiguration
     let ptz: PTZController?
+    let ptzDiscovery: PTZDiscoveryResult?
     @State private var fullscreen = false
     @State private var showingPTZ = false
     @State private var isVisible = false
@@ -65,6 +101,7 @@ private struct LiveCameraView: View {
                             playbackControls
                             captureControls
                             if let ptz { PTZControlsView(controller: ptz) }
+                            else { automaticControlStatus }
                             connectionDetails
                             Label("Live view pauses when Luma is in the background.", systemImage: "moon")
                                 .font(.footnote)
@@ -124,6 +161,22 @@ private struct LiveCameraView: View {
             if isVisible {
                 UIApplication.shared.isIdleTimerDisabled = scenePhase == .active && state == .playing
             }
+        }
+    }
+
+    @ViewBuilder
+    private var automaticControlStatus: some View {
+        switch ptzDiscovery {
+        case nil:
+            ProgressView("Detecting camera controls…")
+        case .unavailable:
+            Label("This device did not report compatible PTZ controls.", systemImage: "video")
+                .font(.footnote).foregroundStyle(.secondary)
+        case .unknown:
+            Label("PTZ detection is unavailable. Check the control port and device account; live view can continue.", systemImage: "info.circle")
+                .font(.footnote).foregroundStyle(.secondary)
+        case .available:
+            EmptyView()
         }
     }
 

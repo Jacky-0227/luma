@@ -187,3 +187,16 @@
 "Play recording" = "播放錄影";
 "This recording could not be played." = "無法播放此錄影。";
 "Stop" = "停止";
+
+"The previous stream is still closing. Wait a moment, then reconnect." = "上一個串流仍在關閉中。請稍候再重新連線。";
+
+"Camera controls are detected automatically." = "自動識別攝影機控制功能。";
+"Advanced control connection" = "進階控制連線";
+"Luma checks PTZ capabilities when you open live view. Detection does not move the camera. The control port is separate from the RTSP port." = "開啟即時畫面時，Luma 會自動偵測雲台能力，偵測不會移動攝影機。控制連接埠與 RTSP 連接埠互相獨立。";
+"Detecting camera controls…" = "正在識別攝影機控制功能…";
+"This device did not report compatible PTZ controls." = "設備未回報相容的雲台控制能力。";
+"PTZ detection is unavailable. Check the control port and device account; live view can continue." = "暫時無法識別雲台能力。請檢查控制連接埠與設備帳號；即時畫面可繼續播放。";
+
+"This camera uses a different network interface. Stop other cameras before reconnecting." = "這台攝影機使用不同的網路連線。請先停止其他攝影機，再重新連線。";
+
+"No local IPv4 route is available for this camera. Check your Wi-Fi connection." = "無法透過本機 IPv4 網路連接這台攝影機。請檢查 Wi-Fi 連線。";

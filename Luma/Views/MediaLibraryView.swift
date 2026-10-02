@@ -1,5 +1,4 @@
 import Observation
-import ImageIO
 import SwiftUI
 import UIKit
 
@@ -82,7 +81,8 @@ struct MediaLibraryView: View {
             )) {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
-            .onAppear { library.reload() }
+            // The library loads its index once and publishes every capture or
+            // deletion. Tab switches must not repeat a full synchronous disk scan.
         }
     }
 }
@@ -134,14 +134,11 @@ private struct SnapshotPreview: View {
             }
         }
         .task(id: url) {
-            // Decode once per presentation, never repeatedly from View.body.
-            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                           kCGImageSourceThumbnailMaxPixelSize: 2048,
-                                           kCGImageSourceCreateThumbnailWithTransform: true]
-            if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                image = UIImage(cgImage: thumbnail)
-            }
+            image = nil
+            didLoad = false
+            let thumbnail = await SnapshotThumbnailLoader.shared.load(url: url)
+            guard !Task.isCancelled else { return }
+            image = thumbnail.map { UIImage(cgImage: $0.image) }
             didLoad = true
         }
     }

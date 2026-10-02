@@ -151,7 +151,7 @@ gh run download RUN_ID --name Luma-test-report --dir build/report
 
 依 [Sideloadly 官方說明](https://sideloadly.io/)，免費 Apple 帳號側載通常需要每七天重新簽名；實際安裝、啟動及續簽結果須透過手機與簽名工具驗證。正常觀看攝影機時，Windows 電腦與 GitHub 建置服務不參與影像傳輸。
 
-雲台控制需另外填寫設備的網頁控制連接埠，通常為 HTTP `80` 或 HTTPS `443`，以及 PTZ 通道。PTZ 通道可能與 RTSP 通道不同。HTTP 控制採用 Digest 驗證；HTTPS 保留系統憑證驗證，需要受信任的設備憑證。
+Luma 會自動讀取設備的雲台能力與通道對應，支援時顯示控制，不需手動開啟，也不會等待辨識完成才播放。設備的網頁連接埠通常為 HTTP `80` 或 HTTPS `443`，如有變更可在進階雲台設定調整。HTTP 控制採用 Digest 驗證；HTTPS 保留系統憑證驗證，需要受信任的設備憑證。
 
 ## 真機驗證
 

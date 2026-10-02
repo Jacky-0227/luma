@@ -13,10 +13,8 @@ struct CameraEditorView: View {
     @State private var quality: StreamQuality
     @State private var useTCP: Bool
     @State private var customPath: String
-    @State private var ptzEnabled: Bool
     @State private var controlPort: String
     @State private var controlUseHTTPS: Bool
-    @State private var ptzChannel: Int
     @State private var password = ""
     @State private var passwordLoaded = false
     @State private var showPassword = false
@@ -33,10 +31,8 @@ struct CameraEditorView: View {
         _quality = State(initialValue: camera?.defaultQuality ?? .sub)
         _useTCP = State(initialValue: camera?.useTCP ?? true)
         _customPath = State(initialValue: camera?.customPath ?? "")
-        _ptzEnabled = State(initialValue: camera?.ptzEnabled ?? false)
         _controlPort = State(initialValue: String(camera?.controlPort ?? 80))
         _controlUseHTTPS = State(initialValue: camera?.controlUseHTTPS ?? false)
-        _ptzChannel = State(initialValue: camera?.ptzChannel ?? 1)
     }
 
     var body: some View {
@@ -108,12 +104,9 @@ struct CameraEditorView: View {
                     Text("For a single camera, use channel 1. For a recorder, choose its camera channel.")
                 }
                 Section {
-                    Toggle("Enable pan, tilt & zoom", isOn: $ptzEnabled)
-                        .accessibilityIdentifier("camera.ptz.enabled")
-                    if ptzEnabled {
-                        Stepper(value: $ptzChannel, in: 1...256) {
-                            LabeledContent("PTZ channel", value: ptzChannel.formatted())
-                        }
+                    Label("Camera controls are detected automatically.", systemImage: "viewfinder")
+                        .accessibilityIdentifier("camera.ptz.automatic")
+                    DisclosureGroup("Advanced control connection") {
                         LabeledContent("Control port") {
                             TextField("Control port", text: $controlPort)
                                 .keyboardType(.numberPad)
@@ -128,7 +121,7 @@ struct CameraEditorView: View {
                 } header: {
                     Text("PTZ CAMERA")
                 } footer: {
-                    Text("For supported Hikvision cameras. Use the camera’s web port and an account with PTZ permission.")
+                    Text("Luma checks PTZ capabilities when you open live view. Detection does not move the camera. The control port is separate from the RTSP port.")
                 }
                 Section {
                     LabeledContent("RTSP port") {
@@ -190,8 +183,8 @@ struct CameraEditorView: View {
             id: camera?.id ?? UUID(), name: name, host: host, port: portValue,
             username: username, channel: channel, defaultQuality: quality,
             useTCP: useTCP, customPath: customPath,
-            ptzEnabled: ptzEnabled, controlPort: controlPortValue,
-            controlUseHTTPS: controlUseHTTPS, ptzChannel: ptzChannel
+            ptzEnabled: camera?.ptzEnabled ?? false, controlPort: controlPortValue,
+            controlUseHTTPS: controlUseHTTPS, ptzChannel: camera?.ptzChannel ?? channel
         )
         do {
             try store.save(draft, password: password)

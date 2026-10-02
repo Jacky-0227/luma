@@ -43,7 +43,7 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 | --- | --- |
 | Live view | Main/sub streams, sound, full screen, fill/fit and bounded reconnect attempts |
 | Dashboard | Up to four cameras per page, muted sub streams by default |
-| PTZ | Eight directions, zoom and stop; separate control port and channel |
+| PTZ | Automatically detects supported pan, tilt and zoom controls; separate web control port |
 | Local captures | Snapshots and manual recordings, up to five minutes per recording |
 | Media library | Preview snapshots, replay local recordings, export and confirm deletion |
 | Configuration backup | Import/export JSON without passwords, snapshots or recordings |
@@ -51,7 +51,7 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 
 PTZ requires a device and account that support Hikvision timed ISAPI movement. A hold is limited to two seconds; release or press Stop to stop movement. HTTP controls require Digest authentication, and HTTPS uses system certificate validation.
 
-**Not implemented:** automatic discovery, PTZ presets, two-way talk, camera SD-card/NVR recording search and playback, picture in picture, widgets, shortcuts and custom dashboard layouts. Playback in the media library refers to recordings made by Luma.
+**Not implemented:** automatic camera discovery, PTZ presets, two-way talk, camera SD-card/NVR recording search and playback, picture in picture, widgets, shortcuts and custom dashboard layouts. Playback in the media library refers to recordings made by Luma.
 
 ## Local by design
 
@@ -71,7 +71,7 @@ PTZ requires a device and account that support Hikvision timed ISAPI movement. A
 
 The IPA is unsigned and is not an App Store package. Free-account installation generally needs renewal after seven days; installation and renewal must be verified on the device. Never place Apple passwords or camera credentials in issues, commits or workflow secrets.
 
-In the camera editor, use the RTSP port (usually 554) for video. Enable PTZ separately with the device's web control port (usually HTTP 80 or HTTPS 443). Start with one sub stream before trying a four-camera dashboard.
+In the camera editor, use the RTSP port (usually 554) for video. Luma detects compatible PTZ capabilities automatically without delaying video playback. If needed, change the device's web control port (usually HTTP 80 or HTTPS 443) in Advanced controls. Start with one sub stream before trying a four-camera dashboard.
 
 ## Build and validate
 

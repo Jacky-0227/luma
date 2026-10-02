@@ -8,6 +8,8 @@ import Observation
 final class PTZController {
     var errorMessage: String?
     private(set) var isMoving = false
+    let supportsPanTilt: Bool
+    let supportsZoom: Bool
 
     @ObservationIgnored private let enabled: Bool
     @ObservationIgnored private let transport: any PTZTransport
@@ -19,14 +21,17 @@ final class PTZController {
     @ObservationIgnored private var pulse: Task<Void, Never>?
     @ObservationIgnored private var deadline: Task<Void, Never>?
 
-    convenience init(configuration: CameraConfiguration, password: String) {
-        self.init(enabled: configuration.ptzEnabled, transport: PTZService(configuration: configuration, password: password))
+    convenience init(configuration: CameraConfiguration, password: String, supportsPanTilt: Bool = true, supportsZoom: Bool = true) {
+        self.init(enabled: configuration.ptzEnabled, transport: PTZService(configuration: configuration, password: password),
+                  supportsPanTilt: supportsPanTilt, supportsZoom: supportsZoom)
     }
 
-    init(enabled: Bool, transport: any PTZTransport, holdLimit: Duration = .seconds(2)) {
+    init(enabled: Bool, transport: any PTZTransport, holdLimit: Duration = .seconds(2), supportsPanTilt: Bool = true, supportsZoom: Bool = true) {
         self.enabled = enabled
         self.transport = transport
         self.holdLimit = holdLimit
+        self.supportsPanTilt = supportsPanTilt
+        self.supportsZoom = supportsZoom
     }
 
     deinit {
@@ -46,6 +51,8 @@ final class PTZController {
 
     private func begin(_ direction: PTZDirection, repeats: Bool) {
         guard enabled else { errorMessage = PTZError.disabled.localizedDescription; return }
+        let isZoom = direction == .zoomIn || direction == .zoomOut
+        guard (isZoom ? supportsZoom : supportsPanTilt) else { errorMessage = PTZError.unsupported.localizedDescription; return }
         generation += 1
         let current = generation
         self.repeats = repeats

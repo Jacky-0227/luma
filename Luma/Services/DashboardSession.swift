@@ -22,8 +22,13 @@ final class DashboardSession {
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored private var transition: Task<Void, Never>?
 
-    func show(_ configurations: [CameraConfiguration], store: CameraStore, active: Bool) {
-        desiredCameras = Array(configurations.prefix(4))
+    func show(_ configurations: [CameraConfiguration], store: CameraStore, active: Bool, forceRestart: Bool = false) {
+        let page = Array(configurations.prefix(4))
+        // Visibility and navigation callbacks may report the same state in one
+        // transition. Reuse its players instead of rereading Keychain and
+        // disposing/reopening up to four identical decoder sessions.
+        guard forceRestart || desiredCameras != page || desiredStore !== store || wantsPlayback != active else { return }
+        desiredCameras = page
         desiredStore = store
         wantsPlayback = active
         scheduleTransition()

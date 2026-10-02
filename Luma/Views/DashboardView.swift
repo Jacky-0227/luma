@@ -64,7 +64,7 @@ struct DashboardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Reconnect cameras", systemImage: "arrow.clockwise") { synchronize() }
+                Button("Reconnect cameras", systemImage: "arrow.clockwise") { synchronize(forceRestart: true) }
                     .disabled(store.cameras.isEmpty || session.isTransitioning || isOpeningCamera)
                     .accessibilityIdentifier("dashboard.reconnect")
             }
@@ -161,9 +161,9 @@ struct DashboardView: View {
         }
     }
 
-    private func synchronize() {
+    private func synchronize(forceRestart: Bool = false) {
         let shouldPlay = isVisible && scenePhase == .active && !showingCamera && !isOpeningCamera
-        session.show(pageCameras, store: store, active: shouldPlay)
+        session.show(pageCameras, store: store, active: shouldPlay, forceRestart: forceRestart)
         updateScreenAwake()
     }
 

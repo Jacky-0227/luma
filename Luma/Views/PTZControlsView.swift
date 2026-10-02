@@ -11,6 +11,7 @@ struct PTZControlsView: View {
                 .font(.subheadline).foregroundStyle(.secondary)
             GlassEffectContainer(spacing: 12) {
                 VStack(spacing: 12) {
+                    if controller.supportsPanTilt {
                     HStack(spacing: 12) {
                         direction(.upLeft, symbol: "arrow.up.left", label: "Move up left")
                         direction(.up, symbol: "arrow.up", label: "Move up")
@@ -18,13 +19,7 @@ struct PTZControlsView: View {
                     }
                     HStack(spacing: 12) {
                         direction(.left, symbol: "arrow.left", label: "Move left")
-                        Button { controller.stop() } label: {
-                            Image(systemName: "stop.fill").frame(width: 42, height: 42)
-                                .foregroundStyle(LumaTheme.onAccent)
-                        }
-                        .buttonStyle(.glassProminent).buttonBorderShape(.circle)
-                        .accessibilityLabel(Text("Stop movement"))
-                        .accessibilityIdentifier("ptz.stop")
+                        stopButton
                         direction(.right, symbol: "arrow.right", label: "Move right")
                     }
                     HStack(spacing: 12) {
@@ -32,11 +27,15 @@ struct PTZControlsView: View {
                         direction(.down, symbol: "arrow.down", label: "Move down")
                         direction(.downRight, symbol: "arrow.down.right", label: "Move down right")
                     }
+                    }
+                    if controller.supportsZoom {
                     HStack(spacing: 28) {
                         direction(.zoomOut, symbol: "minus.magnifyingglass", label: "Zoom out")
+                        if !controller.supportsPanTilt { stopButton }
                         direction(.zoomIn, symbol: "plus.magnifyingglass", label: "Zoom in")
                     }
                     .padding(.top, 12)
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -51,6 +50,16 @@ struct PTZControlsView: View {
         }
         .accessibilityElement(children: .contain)
         .onDisappear { controller.stop() }
+    }
+
+    private var stopButton: some View {
+        Button { controller.stop() } label: {
+            Image(systemName: "stop.fill").frame(width: 42, height: 42)
+                .foregroundStyle(LumaTheme.onAccent)
+        }
+        .buttonStyle(.glassProminent).buttonBorderShape(.circle)
+        .accessibilityLabel(Text("Stop movement"))
+        .accessibilityIdentifier("ptz.stop")
     }
 
     private func direction(_ direction: PTZDirection, symbol: String, label: LocalizedStringKey) -> some View {

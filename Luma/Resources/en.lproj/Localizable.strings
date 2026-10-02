@@ -187,3 +187,16 @@
 "Play recording" = "Play recording";
 "This recording could not be played." = "This recording could not be played.";
 "Stop" = "Stop";
+
+"The previous stream is still closing. Wait a moment, then reconnect." = "The previous stream is still closing. Wait a moment, then reconnect.";
+
+"Camera controls are detected automatically." = "Camera controls are detected automatically.";
+"Advanced control connection" = "Advanced control connection";
+"Luma checks PTZ capabilities when you open live view. Detection does not move the camera. The control port is separate from the RTSP port." = "Luma checks PTZ capabilities when you open live view. Detection does not move the camera. The control port is separate from the RTSP port.";
+"Detecting camera controls…" = "Detecting camera controls…";
+"This device did not report compatible PTZ controls." = "This device did not report compatible PTZ controls.";
+"PTZ detection is unavailable. Check the control port and device account; live view can continue." = "PTZ detection is unavailable. Check the control port and device account; live view can continue.";
+
+"This camera uses a different network interface. Stop other cameras before reconnecting." = "This camera uses a different network interface. Stop other cameras before reconnecting.";
+
+"No local IPv4 route is available for this camera. Check your Wi-Fi connection." = "No local IPv4 route is available for this camera. Check your Wi-Fi connection.";

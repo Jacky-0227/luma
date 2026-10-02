@@ -53,9 +53,9 @@ struct PTZEndpoint: Sendable {
     let scheme: String
     let channel: Int
 
-    init(configuration: CameraConfiguration) throws {
+    init(configuration: CameraConfiguration, requireEnabled: Bool = true) throws {
         let camera = try configuration.validated()
-        guard camera.ptzEnabled else { throw PTZError.disabled }
+        guard !requireEnabled || camera.ptzEnabled else { throw PTZError.disabled }
         host = camera.host.lowercased()
         port = camera.controlPort
         scheme = camera.controlUseHTTPS ? "https" : "http"
@@ -132,7 +132,7 @@ final class PTZService: PTZTransport {
     }
 }
 
-private final class PTZAuthenticationDelegate: NSObject, URLSessionTaskDelegate {
+final class PTZAuthenticationDelegate: NSObject, URLSessionTaskDelegate {
     private let endpoint: PTZEndpoint
     private let username: String
     private let password: String

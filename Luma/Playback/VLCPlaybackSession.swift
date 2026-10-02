@@ -1,6 +1,5 @@
 import Foundation
 import UIKit
-@preconcurrency import MobileVLCKit
 
 /// Only value snapshots cross the Objective-C callback boundary. No URL, error
 /// text, credentials, SDK object, or UIKit view is carried in an event.
@@ -8,6 +7,9 @@ enum VLCPlaybackEvent: Sendable {
     case opening
     case buffering
     case videoPlaying
+    case firstFrame
+    case routeUnavailable
+    case routeConflict
     case failed
     case ended
     case snapshotSaved(String)
@@ -32,12 +34,10 @@ final class VLCPlaybackSession {
     var onEvent: (@MainActor @Sendable (VLCPlaybackEvent) -> Void)?
     var onCaptureEvent: (@MainActor @Sendable (CaptureEvent) -> Void)?
 
-    private var player: VLCMediaPlayer?
-    private var bridge: VLCEventBridge?
-    private weak var surface: UIView?
-    private var lastCropGeometry: String?
-    private var lastDecodedVideo: Int32 = 0
-    private var lastDisplayedPictures: Int32 = 0
+    private var driver: VLCNativeDriver?
+    // Own the drawable on MainActor until the native input has fully stopped.
+    private var surface: UIView?
+    private var hasVideo = false
     private var isRetiring = false
     private var isDisposing = false
     private var captureState: CaptureState = .idle
@@ -52,53 +52,32 @@ final class VLCPlaybackSession {
     private var retirementFinished = false
 
     init(url: URL, useTCP: Bool) {
-        // MobileVLCKit 3.7.3 defaults to this configuration. Set it explicitly
-        // before registering any events: cached SDK state and all our SDK/UI
-        // mutations remain on the main queue. The application never changes it.
-        VLCLibrary.sharedEventsConfiguration = VLCEventsLegacyConfiguration()
-        let mediaPlayer = VLCMediaPlayer(options: ["--quiet", "--no-video-title-show"])
-        mediaPlayer.libraryInstance.loggers = nil
-        let media = VLCMedia(url: url)
-        media.metaData.title = "Luma"
-        media.metaData.url = nil
-        media.addOption(":network-caching=500")
-        if useTCP { media.addOption(":rtsp-tcp") }
-        mediaPlayer.media = media
-        player = mediaPlayer
-
-        let callback = VLCEventBridge { [weak self] event in
+        driver = VLCNativeDriver(url: url, useTCP: useTCP) { [weak self] event in
             self?.handle(event)
         }
-        bridge = callback
-        mediaPlayer.delegate = callback
     }
 
     func start(on view: UIView, muted: Bool, aspectFill: Bool) {
-        guard let player, !isRetiring else { return }
+        guard !isRetiring else { return }
         surface = view
-        player.drawable = view
-        setMuted(muted)
-        setAspectFill(aspectFill, bounds: view.bounds)
-        player.play()
+        driver?.start(on: view, muted: muted, aspectFill: aspectFill)
     }
 
     func setMuted(_ muted: Bool) {
-        guard let player, !isRetiring else { return }
-        // VLCKit exposes the weak audio controller as optional. It may not
-        // exist before playback; CameraPlayer reapplies the requested mute
-        // state when the first real video-playing event arrives.
-        player.audio?.isMuted = muted
+        guard !isRetiring else { return }
+        driver?.setMuted(muted)
     }
 
     func captureSnapshot() {
-        guard !isRetiring, capture == nil, let player, player.hasVideoOut else { return }
+        guard !isRetiring, capture == nil, hasVideo else { return }
         do {
             let destination = try MediaLibrary.shared.prepare(.snapshot)
             capture = destination
             setCaptureState(.savingSnapshot)
             armCaptureTimeout(seconds: 8)
-            if !LumaRequestSnapshot(player, destination.snapshotURL.path) {
-                failCapture()
+            driver?.captureSnapshot(at: destination.snapshotURL.path) { [weak self] submitted in
+                guard let self, self.capture?.id == destination.id else { return }
+                if !submitted { self.failCapture() }
             }
         } catch {
             onCaptureEvent?(.failed(MediaLibraryError.saveFailed.localizedDescription))
@@ -111,7 +90,7 @@ final class VLCPlaybackSession {
             finishRecording()
             return
         }
-        guard capture == nil, let player, player.hasVideoOut else { return }
+        guard capture == nil, hasVideo else { return }
         do {
             // libvlc's input inherits input-record-path once and caches it.
             // Every recording in this session must use that same directory.
@@ -123,10 +102,10 @@ final class VLCPlaybackSession {
             capture = destination
             setCaptureState(.startingRecording)
             armCaptureTimeout(seconds: 10)
-            // 3.7.3 directly casts libvlc's 0(success)/-1(error) to BOOL.
-            // Do not interpret this broken BOOL contract as proof of success.
-            // Only the started/stopped delegates and validated file confirm it.
-            _ = player.startRecording(atPath: recordingWorkspace.directory.path)
+            driver?.startRecording(at: recordingWorkspace.directory.path) { [weak self] submitted in
+                guard let self, self.capture?.id == destination.id else { return }
+                if !submitted { self.failCapture() }
+            }
         } catch {
             onCaptureEvent?(.failed(MediaLibraryError.saveFailed.localizedDescription))
         }
@@ -137,12 +116,15 @@ final class VLCPlaybackSession {
         recordingLimit?.cancel()
         recordingLimit = nil
         setCaptureState(.finishingRecording)
-        _ = player?.stopRecording()
+        driver?.stopRecording()
         armCaptureTimeout(seconds: 15)
     }
 
     private func handle(_ event: VLCPlaybackEvent) {
         switch event {
+        case .videoPlaying, .firstFrame:
+            hasVideo = true
+            if !isRetiring { onEvent?(event) }
         case .snapshotSaved(let path):
             guard let capture, capture.kind == .snapshot,
                   URL(fileURLWithPath: path).standardizedFileURL == capture.snapshotURL.standardizedFileURL else { return }
@@ -150,7 +132,7 @@ final class VLCPlaybackSession {
         case .recordingStarted:
             guard capture?.kind == .recording else { return }
             if isRetiring || captureState == .finishingRecording {
-                _ = player?.stopRecording()
+                driver?.stopRecording()
                 return
             }
             captureTimeout?.cancel()
@@ -203,7 +185,7 @@ final class VLCPlaybackSession {
     private func failCapture() {
         let wasRecording = capture?.kind == .recording
         if let capture { abandonedCaptures.append(capture) }
-        if wasRecording { _ = player?.stopRecording() }
+        if wasRecording { driver?.stopRecording() }
         clearCapture()
         onCaptureEvent?(.failed(String(localized: "Capture failed. The stream may have disconnected or this format may not support recording.")))
         if isRetiring {
@@ -232,38 +214,18 @@ final class VLCPlaybackSession {
 
     /// Live RTSP streams need not report a useful timeline. Frame statistics
     /// are a second liveness signal and advance even when the scene is static.
-    func videoMadeProgress() -> Bool {
-        guard let player, !isRetiring, player.hasVideoOut,
-              let media = player.media else { return false }
-        let statistics = media.statistics
-        let progressed = statistics.decodedVideo != lastDecodedVideo
-            || statistics.displayedPictures != lastDisplayedPictures
-        lastDecodedVideo = statistics.decodedVideo
-        lastDisplayedPictures = statistics.displayedPictures
-        return progressed
+    func pollVideoProgress() {
+        guard !isRetiring else { return }
+        driver?.pollVideoProgress()
     }
 
     func setAspectFill(_ fill: Bool, bounds: CGRect) {
-        guard let player, !isRetiring, bounds.width > 0, bounds.height > 0 else { return }
-        let geometry = fill ? "\(Int(bounds.width.rounded())):\(Int(bounds.height.rounded()))" : nil
-        guard geometry != lastCropGeometry else { return }
-        lastCropGeometry = geometry
-        player.videoAspectRatio = nil
-        player.scaleFactor = 0
-        if let geometry {
-            // libvlc copies the geometry in its setter; the pointer is valid
-            // for this call only. Cropping preserves the original video ratio.
-            geometry.withCString { pointer in
-                player.videoCropGeometry = UnsafeMutablePointer(mutating: pointer)
-            }
-        } else {
-            player.videoCropGeometry = nil
-        }
+        guard !isRetiring else { return }
+        driver?.setAspectFill(fill, bounds: bounds)
     }
 
-    /// SDK stop is asynchronous, but final player release can join its decoder
-    /// worker. Invalidate callbacks on the UI actor, then exclusively transfer
-    /// final destruction to a serial queue. Keep the view alive until that ends.
+    /// Capture completion remains UI-owned. Native input shutdown and any
+    /// SDK locks run on the driver queue; the view stays alive until completion.
     func retire(completion: (@MainActor @Sendable () -> Void)? = nil) {
         if retirementFinished { completion?(); return }
         if let completion { retirementCompletions.append(completion) }
@@ -271,7 +233,7 @@ final class VLCPlaybackSession {
         isRetiring = true
         retirementRetainer = self
         onEvent = nil
-        player?.audio?.isMuted = true
+        driver?.setMuted(true)
         if capture != nil {
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Finish local capture") { [weak self] in
                 Task { @MainActor in self?.failCapture() }
@@ -285,33 +247,13 @@ final class VLCPlaybackSession {
     private func disposePlayer() {
         guard !isDisposing else { return }
         isDisposing = true
-        guard let player else { finishRetirement(); return }
+        guard let driver else { finishRetirement(); return }
         onCaptureEvent = nil
-        player.delegate = nil
-        bridge = nil
-        player.stop()
-        let retainedSurface = surface
-        surface = nil
-        player.drawable = nil
-        player.media = nil
-
-        let disposal = VLCDisposalBox(player: player)
-        self.player = nil
-
-        // Enqueue on the next main turn so this method's temporary strong
-        // references have left the stack before background destruction begins.
-        DispatchQueue.main.async {
-            VLCDisposalBox.queue.async {
-                disposal.releasePlayer()
-                DispatchQueue.main.async {
-                    // UIKit lifetime ends on the main queue, after the decoder
-                    // stopped using its old drawable. Starting a replacement
-                    // stream is safe only after this callback.
-                    withExtendedLifetime(retainedSurface) {
-                        self.finishRetirement()
-                    }
-                }
-            }
+        driver.retire { [self] completed in
+            guard completed else { return }
+            self.driver = nil
+            surface = nil
+            finishRetirement()
         }
     }
 
@@ -331,85 +273,5 @@ final class VLCPlaybackSession {
         retirementCompletions = []
         for completion in completions { completion() }
         retirementRetainer = nil
-    }
-}
-
-/// MobileVLCKit is Objective-C and does not express isolation. The bridge itself
-/// is immutable. It reads SDK snapshots in VLC's explicitly configured main
-/// callback queue, then sends only Sendable values to its MainActor recipient.
-private final class VLCEventBridge: NSObject, VLCMediaPlayerDelegate {
-    private let onEvent: @MainActor @Sendable (VLCPlaybackEvent) -> Void
-
-    init(onEvent: @escaping @MainActor @Sendable (VLCPlaybackEvent) -> Void) {
-        self.onEvent = onEvent
-        super.init()
-    }
-
-    func mediaPlayerStateChanged(_ notification: Notification) {
-        guard let player = notification.object as? VLCMediaPlayer else { return }
-        let event: VLCPlaybackEvent
-        switch player.state {
-        case .opening:
-            event = .opening
-        case .buffering:
-            event = .buffering
-        case .playing:
-            // A playing event can precede the video output, or be audio-only.
-            // A time event will confirm the video once the renderer is ready.
-            event = player.hasVideoOut ? .videoPlaying : .opening
-        case .error:
-            event = .failed
-        case .stopped, .ended, .paused:
-            event = .ended
-        default:
-            return
-        }
-        send(event)
-    }
-
-    func mediaPlayerTimeChanged(_ notification: Notification) {
-        guard let player = notification.object as? VLCMediaPlayer,
-              player.isPlaying, player.hasVideoOut else { return }
-        send(.videoPlaying)
-    }
-
-    func mediaPlayerSnapshot(_ notification: Notification) {
-        guard let player = notification.object as? VLCMediaPlayer,
-              let path = player.snapshots?.last as? String else { return }
-        send(.snapshotSaved(path))
-    }
-
-    func mediaPlayerStartedRecording(_ player: VLCMediaPlayer) {
-        send(.recordingStarted)
-    }
-
-    func mediaPlayer(_ player: VLCMediaPlayer, recordingStoppedAtPath path: String) {
-        send(.recordingStopped(path))
-    }
-
-    private func send(_ event: VLCPlaybackEvent) {
-        let recipient = onEvent
-        DispatchQueue.main.async {
-            recipient(event)
-        }
-    }
-}
-
-/// Safety invariant: constructed on MainActor, published exactly once, then its
-/// player is accessed ONLY by `queue`. The app drops all other references and
-/// invalidates its delegate before publication. This narrowly scoped unchecked
-/// transfer avoids asserting that VLCMediaPlayer itself is generally Sendable.
-/// Remove the box when the SDK exposes an asynchronous completion-based dispose.
-private final class VLCDisposalBox: @unchecked Sendable {
-    static let queue = DispatchQueue(label: "app.luma.vlc-disposal", qos: .utility)
-    private var player: VLCMediaPlayer?
-
-    init(player: VLCMediaPlayer) {
-        self.player = player
-    }
-
-    func releasePlayer() {
-        dispatchPrecondition(condition: .onQueue(Self.queue))
-        player = nil
     }
 }

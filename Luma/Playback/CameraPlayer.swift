@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 import UIKit
 
 enum PlaybackState: Equatable, Sendable {
@@ -33,7 +34,11 @@ final class CameraPlayer {
     @ObservationIgnored private var reconnectAttempt = 0
     @ObservationIgnored private var retryTask: Task<Void, Never>?
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
+    @ObservationIgnored private var retirementWatchdog: Task<Void, Never>?
+    @ObservationIgnored private var retirementTimedOut = false
     @ObservationIgnored private var lastPlaybackActivity = ContinuousClock.now
+    @ObservationIgnored private var sessionStartedAt = ContinuousClock.now
+    @ObservationIgnored private var firstFrameLogged = false
     @ObservationIgnored private var hasStartedPlayback = false
     @ObservationIgnored private var stopWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -46,6 +51,7 @@ final class CameraPlayer {
     deinit {
         retryTask?.cancel()
         watchdogTask?.cancel()
+        retirementWatchdog?.cancel()
         // The session is MainActor isolated (and therefore Sendable). Its SDK
         // references are only touched after hopping back to their owning actor.
         let orphanedSession = session
@@ -80,6 +86,10 @@ final class CameraPlayer {
 
     func play() {
         guard !wantsPlayback else { return }
+        guard !isRetiring || !retirementTimedOut else {
+            state = .failed(Self.closingMessage)
+            return
+        }
         wantsPlayback = true
         reconnectAttempt = 0
         retryReady = true
@@ -123,6 +133,10 @@ final class CameraPlayer {
     }
 
     func retry() {
+        guard !isRetiring || !retirementTimedOut else {
+            state = .failed(Self.closingMessage)
+            return
+        }
         wantsPlayback = true
         reconnectAttempt = 0
         restart()
@@ -194,6 +208,8 @@ final class CameraPlayer {
         }
         session = nextSession
         lastPlaybackActivity = .now
+        sessionStartedAt = .now
+        firstFrameLogged = false
         hasStartedPlayback = false
         nextSession.start(on: surface, muted: isMuted, aspectFill: aspectFill)
         armWatchdog(for: id)
@@ -220,6 +236,20 @@ final class CameraPlayer {
                     session.setAspectFill(aspectFill, bounds: surface.bounds)
                 }
             }
+        case .firstFrame:
+            guard !firstFrameLogged else { return }
+            firstFrameLogged = true
+            let elapsed = sessionStartedAt.duration(to: .now).components
+            let milliseconds = elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000
+            Self.performanceLog.notice("first_frame elapsed_ms=\(milliseconds, privacy: .public)")
+            receive(.videoPlaying, from: id)
+        case .routeConflict:
+            wantsPlayback = false
+            cancelScheduledWork()
+            state = .failed(String(localized: "This camera uses a different network interface. Stop other cameras before reconnecting."))
+            retireCurrentSession()
+        case .routeUnavailable:
+            recoverOrFail(String(localized: "No local IPv4 route is available for this camera. Check your Wi-Fi connection."))
         case .failed, .ended:
             recoverOrFail(String(localized: "Unable to play this camera. Check its address, account, and Wi-Fi connection."))
         case .snapshotSaved, .recordingStarted, .recordingStopped:
@@ -241,13 +271,15 @@ final class CameraPlayer {
                 }
                 guard !Task.isCancelled, let self,
                       self.wantsPlayback, self.session?.id == id else { return }
-                if self.session?.videoMadeProgress() == true {
-                    self.receive(.videoPlaying, from: id)
-                }
+                self.session?.pollVideoProgress()
                 // Also catch a stream that silently freezes after it started.
                 // Buffering notifications do not count as advancing video.
                 // Established streams get more time for a temporary Wi-Fi gap.
-                let timeout: Duration = self.hasStartedPlayback ? .seconds(30) : .seconds(15)
+                // RTSP may prepare video and audio separately. On real iOS
+                // hardware live555 can spend ~10 seconds per track before
+                // SETUP; 15 seconds cut off a valid authenticated connection.
+                // Keep a finite startup deadline that covers both tracks.
+                let timeout: Duration = self.hasStartedPlayback ? .seconds(30) : .seconds(45)
                 if self.lastPlaybackActivity.duration(to: .now) >= timeout {
                     self.watchdogTask = nil
                     self.recoverOrFail(String(localized: "The camera did not respond. Check Local Network access in Settings and connect to the same Wi-Fi."))
@@ -291,8 +323,23 @@ final class CameraPlayer {
         guard let retiringSession = session else { return }
         session = nil
         isRetiring = true
+        retirementTimedOut = false
+        retirementWatchdog?.cancel()
+        retirementWatchdog = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            guard !Task.isCancelled, let self, self.isRetiring else { return }
+            self.retirementTimedOut = true
+            self.wantsPlayback = false
+            self.cancelScheduledWork()
+            self.state = .failed(Self.closingMessage)
+            // Do not resume stopAndWait or create another decoder here.
+            // The native input and its view remain owned until actual stop.
+        }
         retiringSession.retire { [weak self] in
             guard let self else { return }
+            self.retirementWatchdog?.cancel()
+            self.retirementWatchdog = nil
+            self.retirementTimedOut = false
             self.isRetiring = false
             let waiters = self.stopWaiters
             self.stopWaiters = []
@@ -300,6 +347,13 @@ final class CameraPlayer {
             self.beginIfReady()
         }
     }
+
+    private static var closingMessage: String {
+        String(localized: "The previous stream is still closing. Wait a moment, then reconnect.")
+    }
+
+    // Local timing only: no host, device name, URL, credential or telemetry.
+    private static let performanceLog = Logger(subsystem: "app.luma.viewer", category: "Playback")
 
     private func cancelScheduledWork() {
         retryTask?.cancel()
