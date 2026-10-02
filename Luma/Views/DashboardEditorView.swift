@@ -6,6 +6,7 @@ struct DashboardEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: DashboardConfiguration
     @State private var message: InterfaceMessage?
+    @FocusState private var nameFocused: Bool
     private let isNew: Bool
 
     init(store: CameraStore, dashboards: DashboardStore, dashboard: DashboardConfiguration?) {
@@ -26,6 +27,9 @@ struct DashboardEditorView: View {
                 Section("Dashboard name") {
                     TextField("Name", text: $draft.name)
                         .textInputAutocapitalization(.sentences)
+                        .focused($nameFocused)
+                        .submitLabel(.done)
+                        .onSubmit { nameFocused = false }
                         .accessibilityIdentifier("dashboard.name")
                 }
                 Section("Layout") {
@@ -77,7 +81,7 @@ struct DashboardEditorView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .scrollDismissesKeyboard(.immediately)
+            .scrollDismissesKeyboard(.interactively)
             .background { LumaBackground() }
             .navigationTitle(isNew ? String(localized: "Add dashboard") : String(localized: "Edit dashboard"))
             .navigationBarTitleDisplayMode(.inline)

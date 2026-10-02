@@ -17,7 +17,8 @@ final class DashboardUITests: XCTestCase {
         let name = app.textFields["dashboard.name"]
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         name.tap()
-        name.typeText("Porch group")
+        name.typeText("Porch group\n")
+        waitFor(NSPredicate(format: "exists == false"), on: app.keyboards.firstMatch)
 
         let entry = selection("Entry", app: app)
         reveal(entry, app: app)
@@ -55,7 +56,8 @@ final class DashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["dashboard.move-up.\(entryID)"].isEnabled)
         capture("en-dashboard-editor")
         name.tap()
-        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Porch group".count) + "Courtyard")
+        name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Porch group".count) + "Courtyard\n")
+        waitFor(NSPredicate(format: "exists == false"), on: app.keyboards.firstMatch)
         app.buttons["dashboard.save"].tap()
         let renamed = app.descendants(matching: .any).matching(identifier: "dashboard.card.\(dashboardID)").firstMatch
         XCTAssertTrue(renamed.waitForExistence(timeout: 5))
@@ -111,7 +113,26 @@ final class DashboardUITests: XCTestCase {
         let surfaces = [app.collectionViews.firstMatch, app.tables.firstMatch, app.scrollViews.firstMatch]
         let scrollSurface = surfaces.first(where: { $0.exists && $0.isHittable }) ?? app
         for _ in 0..<5 where !element.isHittable {
-            if towardTop { scrollSurface.swipeDown() } else { scrollSurface.swipeUp() }
+            // UIKit keeps the Form's full-screen accessibility frame while
+            // the keyboard covers its lower part. Default swipeUp therefore
+            // starts on keyboard keys, not on the Form. Clip both endpoints
+            // to the currently visible content, including the prediction bar.
+            var visible = scrollSurface.frame.intersection(app.frame)
+            let navigationBottom = app.navigationBars.allElementsBoundByIndex
+                .filter(\.isHittable).map { $0.frame.maxY }.max() ?? visible.minY
+            let top = max(visible.minY, navigationBottom) + 16
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists {
+                visible.size.height = max(0, min(visible.maxY, keyboard.frame.minY - 50) - visible.minY)
+            }
+            let bottom = visible.maxY - 16
+            guard bottom - top > 80 else { break }
+            let upper = top + (bottom - top) * 0.2
+            let lower = bottom - (bottom - top) * 0.2
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: visible.midX - app.frame.minX, dy: (towardTop ? upper : lower) - app.frame.minY))
+            let end = origin.withOffset(CGVector(dx: visible.midX - app.frame.minX, dy: (towardTop ? lower : upper) - app.frame.minY))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
         if !element.isHittable {
             capture("dashboard-missing-control")
