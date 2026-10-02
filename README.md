@@ -71,7 +71,7 @@ PTZ requires a device and account that support Hikvision timed ISAPI movement. A
 
 The IPA is unsigned and is not an App Store package. Free-account installation generally needs renewal after seven days; installation and renewal must be verified on the device. Never place Apple passwords or camera credentials in issues, commits or workflow secrets.
 
-In the camera editor, use the RTSP port (usually 554) for video. Luma detects compatible PTZ capabilities automatically without delaying video playback. If needed, change the device's web control port (usually HTTP 80 or HTTPS 443) in Advanced controls. Start with one sub stream before trying a four-camera dashboard.
+In the camera editor, use the RTSP port (usually 554) for video. Luma detects compatible PTZ capabilities automatically without delaying video playback. If needed, change the device's web control port (usually HTTP 80 or HTTPS 443) in Advanced control connection. Start with one sub stream before trying a four-camera dashboard.
 
 ## Build and validate
 

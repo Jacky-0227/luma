@@ -39,8 +39,10 @@ final class VLCCaptureIntegrationTests: XCTestCase {
         let probe = CaptureProbe()
         let session = VLCPlaybackSession(url: movie, useTCP: false)
         session.onEvent = { event in
+            probe.observe(event)
             switch event {
             case .videoPlaying: probe.videoStarted = true
+            case .firstFrame: probe.firstFrameReceived = true
             case .failed: probe.failure = "VLC failed to open the generated local H.264 test pattern."
             default: break
             }
@@ -56,19 +58,25 @@ final class VLCCaptureIntegrationTests: XCTestCase {
         }
 
         do {
+            probe.phase = "initial playback"
             session.start(on: video, muted: true, aspectFill: false)
-            try await waitFor("VLC did not emit a real video-playing event", probe: probe) { probe.videoStarted }
+            try await waitFor("VLC did not confirm a decoded or displayed video frame", probe: probe) { probe.firstFrameReceived }
+            XCTAssertTrue(probe.videoStarted, "First-frame evidence must also publish the normal video-playing event for local library consumers.")
+            probe.phase = "snapshot"
             session.captureSnapshot()
             try await waitFor("VLC snapshot completion did not produce a library item", probe: probe) { probe.snapshotSaved }
             for recordingNumber in 1...2 {
+                probe.phase = "recording \(recordingNumber) start"
                 probe.recordingStarted = false
                 probe.recordingSaved = false
                 session.toggleRecording()
                 try await waitFor("VLC did not confirm recording \(recordingNumber) started", probe: probe) { probe.recordingStarted }
                 try await Task.sleep(for: .seconds(3))
+                probe.phase = "recording \(recordingNumber) finalization"
                 session.toggleRecording()
                 try await waitFor("VLC recording \(recordingNumber) completion did not produce a library item", probe: probe, seconds: 18) { probe.recordingSaved }
             }
+            probe.phase = "initial session retirement"
             await withCheckedContinuation { continuation in
                 session.retire { continuation.resume() }
             }
@@ -81,11 +89,13 @@ final class VLCCaptureIntegrationTests: XCTestCase {
                 let bytes = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
                 XCTAssertGreaterThan(try XCTUnwrap(bytes).int64Value, 0, "A completed SDK callback must leave a nonempty file.")
                 if item.kind == .recording {
+                    probe.phase = "finalized recording replay"
                     try await verifyRecordingPlayback(url, on: video)
                 }
                 try library.delete(item)
             }
         } catch {
+            recordFailure(error, probe: probe, name: "vlc-capture-failure")
             await withCheckedContinuation { continuation in
                 session.retire { continuation.resume() }
             }
@@ -99,20 +109,37 @@ final class VLCCaptureIntegrationTests: XCTestCase {
         let probe = CaptureProbe()
         let playback = VLCPlaybackSession(url: url, useTCP: false)
         playback.onEvent = { event in
+            probe.observe(event)
             switch event {
             case .videoPlaying: probe.videoStarted = true
+            case .firstFrame: probe.firstFrameReceived = true
             case .failed: probe.failure = "VLC could not replay its finalized local recording."
             default: break
             }
         }
         do {
+            probe.phase = "finalized recording replay"
             playback.start(on: view, muted: true, aspectFill: false)
-            try await waitFor("The finalized recording did not produce video when replayed", probe: probe) { probe.videoStarted }
+            try await waitFor("The finalized recording did not decode or display a video frame when replayed", probe: probe) { probe.firstFrameReceived }
+            XCTAssertTrue(probe.videoStarted, "A replay's first frame must also publish the normal video-playing event.")
             await withCheckedContinuation { continuation in playback.retire { continuation.resume() } }
         } catch {
+            recordFailure(error, probe: probe, name: "vlc-recording-replay-failure")
             await withCheckedContinuation { continuation in playback.retire { continuation.resume() } }
             throw error
         }
+    }
+
+    @MainActor
+    private func recordFailure(_ error: Error, probe: CaptureProbe, name: String) {
+        let message = "VLC integration failure during \(probe.phase): \(error.localizedDescription)"
+        let attachment = XCTAttachment(string: message + "\nfirstFrame=\(probe.firstFrameReceived), videoPlaying=\(probe.videoStarted), snapshotSaved=\(probe.snapshotSaved), recordingStarted=\(probe.recordingStarted), recordingSaved=\(probe.recordingSaved), callbackFailure=\(probe.failure ?? "none")\nevents=\(probe.events.joined(separator: ", "))")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        // Record before awaiting cleanup: a shutdown/framework exception must
+        // not replace the useful failure with XCTest's generic deinit error.
+        XCTFail(message)
     }
 
     @MainActor
@@ -197,11 +224,33 @@ final class VLCCaptureIntegrationTests: XCTestCase {
 
 @MainActor
 private final class CaptureProbe {
+    var phase = "preparation"
+    var firstFrameReceived = false
     var videoStarted = false
     var snapshotSaved = false
     var recordingStarted = false
     var recordingSaved = false
     var failure: String?
+    var events: [String] = []
+
+    func observe(_ event: VLCPlaybackEvent) {
+        let name: String
+        switch event {
+        case .opening: name = "opening"
+        case .buffering: name = "buffering"
+        case .videoPlaying: name = "videoPlaying"
+        case .firstFrame: name = "firstFrame"
+        case .routeUnavailable: name = "routeUnavailable"
+        case .routeConflict: name = "routeConflict"
+        case .failed: name = "failed"
+        case .ended: name = "ended"
+        case .snapshotSaved: name = "snapshotSaved"
+        case .recordingStarted: name = "recordingStarted"
+        case .recordingStopped: name = "recordingStopped"
+        }
+        // Fixed labels only; no native paths, URLs, or media metadata.
+        if events.last != name && events.count < 40 { events.append(name) }
+    }
 }
 
 private enum IntegrationFailure: LocalizedError {

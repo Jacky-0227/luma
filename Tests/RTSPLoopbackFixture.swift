@@ -28,6 +28,19 @@ final class RTSPLoopbackFixture {
     private let nonce = "0123456789abcdef0123456789abcdef"
     private var listener: NWListener?
     private var peers: [UUID: Peer] = [:]
+    private var began = ProcessInfo.processInfo.systemUptime
+    private var timeline: [String] = []
+
+    /// Only synthetic protocol phases and relative durations are recorded.
+    /// URLs, authorization headers and credentials never enter attachments.
+    var diagnostics: String {
+        (timeline + ["Totals: connections=\(connectionCount), requests=\(requestCount), authenticated=\(authenticatedRequests), rejected=\(rejectedCredentials), setup=\(setupRequests), play=\(playRequests), teardown=\(teardownRequests), RTP packets=\(sentVideoPackets)"]).joined(separator: "\n")
+    }
+
+    func mark(_ event: String) {
+        guard timeline.count < 160 else { return }
+        timeline.append(String(format: "+%.3fs %@", ProcessInfo.processInfo.systemUptime - began, event))
+    }
 
     init(username: String = "viewer", password: String, behavior: Behavior = .video,
          video: RTSPH264Pattern? = nil) {
@@ -38,6 +51,8 @@ final class RTSPLoopbackFixture {
     }
 
     func start() async throws {
+        began = ProcessInfo.processInfo.systemUptime
+        mark("listener starting")
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host("127.0.0.1"), port: .any)
         let next = try NWListener(using: parameters)
@@ -46,8 +61,12 @@ final class RTSPLoopbackFixture {
             Task { @MainActor in
                 guard let self else { return }
                 switch state {
-                case .ready: self.port = self.listener?.port?.rawValue
-                case .failed: self.failure = "The loopback RTSP listener failed."
+                case .ready:
+                    self.port = self.listener?.port?.rawValue
+                    self.mark("listener ready")
+                case .failed:
+                    self.failure = "The loopback RTSP listener failed."
+                    self.mark("listener failed")
                 default: break
                 }
             }
@@ -65,6 +84,7 @@ final class RTSPLoopbackFixture {
     }
 
     func stop() {
+        if listener != nil { mark("fixture stopped") }
         listener?.cancel()
         listener = nil
         for peer in peers.values { peer.stop() }
@@ -76,6 +96,7 @@ final class RTSPLoopbackFixture {
         let peer = Peer(connection: connection)
         peers[peer.id] = peer
         connectionCount += 1
+        mark("TCP connection accepted")
         connection.start(queue: .main)
         receive(peer)
     }
@@ -87,6 +108,7 @@ final class RTSPLoopbackFixture {
                 if let data { peer.input.append(data) }
                 self.consume(peer)
                 if complete || error != nil {
+                    self.mark("TCP connection closed")
                     peer.stop()
                     self.peers.removeValue(forKey: peer.id)
                 } else if self.peers[peer.id] != nil {
@@ -130,6 +152,8 @@ final class RTSPLoopbackFixture {
 
     private func handle(method: String, target: String, headers: [String: String], peer: Peer) {
         requestCount += 1
+        let knownMethods = ["OPTIONS", "DESCRIBE", "SETUP", "PLAY", "GET_PARAMETER", "TEARDOWN"]
+        mark("request \(knownMethods.contains(method) ? method : "OTHER")")
         guard behavior != .stalledHandshake else { return }
         let sequence = headers["cseq"] ?? "0"
         if method == "OPTIONS" {
@@ -145,12 +169,14 @@ final class RTSPLoopbackFixture {
         }
         guard validDigest(headers["authorization"], method: method, target: target) else {
             if headers["authorization"] != nil { rejectedCredentials += 1 }
+            mark(headers["authorization"] == nil ? "Digest challenge" : "Digest rejected")
             reply(peer, sequence: sequence, status: "401 Unauthorized", headers: [
                 "WWW-Authenticate": "Digest realm=\"\(realm)\", nonce=\"\(nonce)\", algorithm=MD5"
             ])
             return
         }
         authenticatedRequests += 1
+        mark("Digest accepted")
         let base = "rtsp://127.0.0.1:\(port ?? 0)/Streaming/Channels/102/"
         switch method {
         case "DESCRIBE":
@@ -169,6 +195,7 @@ final class RTSPLoopbackFixture {
                 reply(peer, sequence: sequence, status: "461 Unsupported Transport"); return
             }
             if case .delayedSetup(let seconds) = behavior {
+                mark(String(format: "SETUP response delayed %.3fs", seconds))
                 // Deliberately exceed the former 15-second startup watchdog.
                 // One delayed track reproduces the camera's slow two-track
                 // negotiation without pretending to transmit synthetic audio.
@@ -215,6 +242,7 @@ final class RTSPLoopbackFixture {
     }
 
     private func reply(_ peer: Peer, sequence: String, status: String = "200 OK", headers: [String: String] = [:], body: Data = Data()) {
+        mark("response \(status)")
         var lines = ["RTSP/1.0 \(status)", "CSeq: \(sequence)", "Server: LumaLoopbackFixture", "Content-Length: \(body.count)"]
         lines += headers.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }
         var data = Data((lines.joined(separator: "\r\n") + "\r\n\r\n").utf8)
@@ -245,6 +273,7 @@ final class RTSPLoopbackFixture {
                         packet.append(payload)
                         var interleaved = Data([0x24, 0, UInt8(packet.count >> 8), UInt8(packet.count & 255)])
                         interleaved.append(packet)
+                        if self.sentVideoPackets == 0 { self.mark("first RTP packet sent") }
                         self.send(interleaved, peer: peer)
                         self.sentVideoPackets += 1
                         packetCount &+= 1

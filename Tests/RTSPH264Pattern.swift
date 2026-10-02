@@ -79,8 +79,13 @@ struct RTSPH264Pattern: Sendable {
         var sps = Data(), pps = Data()
         var frames: [[Data]] = []
         while let sample = output.copyNextSampleBuffer() {
+            // Compressed AVAssetReader output may contain marker-only buffers
+            // (stream/edit boundaries). They carry no media sample or block.
+            // Only actual samples belong in the RTP fixture's frame sequence.
+            let sampleCount = CMSampleBufferGetNumSamples(sample)
+            if sampleCount == 0 { continue }
             guard let format = CMSampleBufferGetFormatDescription(sample), let block = CMSampleBufferGetDataBuffer(sample) else {
-                throw RTSPFixtureError.failed("RTSP fixture contains an invalid encoded sample.")
+                throw RTSPFixtureError.failed("RTSP fixture media sample has no format or data block (samples: \(sampleCount)).")
             }
             var headerLength: Int32 = 0
             if sps.isEmpty {
@@ -118,8 +123,8 @@ struct RTSPH264Pattern: Sendable {
             guard offset == bytes.count, !units.isEmpty else { throw RTSPFixtureError.failed("RTSP fixture frame is truncated.") }
             frames.append(units)
         }
-        guard reader.status == .completed, !sps.isEmpty, !pps.isEmpty, !frames.isEmpty else {
-            throw RTSPFixtureError.failed("RTSP fixture did not yield playable H.264 frames.")
+        guard reader.status == .completed, !sps.isEmpty, !pps.isEmpty, frames.count == 30 else {
+            throw RTSPFixtureError.failed("RTSP fixture did not yield all 30 encoded H.264 frames (received \(frames.count)).")
         }
         return RTSPH264Pattern(sps: sps, pps: pps, frames: frames)
     }

@@ -272,6 +272,11 @@ final class VLCNativeDriver: @unchecked Sendable {
         firstFrameReported = true
         firstFrameProbe?.cancel()
         firstFrameProbe = nil
+        // A native Playing event can arrive before vout exists and be filtered
+        // above. The frame counters are stronger evidence; publish the normal
+        // playback event too so consumers do not depend on TimeChanged (which
+        // is not guaranteed for every live input) to leave their loading state.
+        emit(.videoPlaying)
         emit(.firstFrame)
     }
 

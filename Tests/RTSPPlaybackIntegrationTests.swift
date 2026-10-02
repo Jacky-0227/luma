@@ -11,6 +11,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
     @MainActor
     func testDigestWithReservedPasswordCharactersDecodesRealRTSPFrames() async throws {
         let fixture = RTSPLoopbackFixture(password: fixturePassword, video: try await RTSPH264Pattern.make())
+        defer { attachTimeline(fixture, name: "rtsp-digest-phases") }
         try await fixture.start()
         defer { fixture.stop() }
         let host = try VideoHost()
@@ -23,13 +24,17 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
         let previousItems = Set(library.items.map(\.id))
         defer { for item in library.items where !previousItems.contains(item.id) { try? library.delete(item) } }
         session.onEvent = { event in
-            if case .videoPlaying = event { probe.videoStarted = true }
-            if case .failed = event { probe.failed = true }
+            if case .firstFrame = event {
+                if !probe.videoStarted { fixture.mark("first decoded frame received") }
+                probe.videoStarted = true
+            }
+            if case .failed = event { probe.failed = true; fixture.mark("playback failed") }
         }
         session.onCaptureEvent = { event in
-            if case .saved(.snapshot) = event { probe.snapshotSaved = true }
+            if case .saved(.snapshot) = event { probe.snapshotSaved = true; fixture.mark("snapshot saved") }
         }
         do {
+            fixture.mark("playback start requested")
             session.start(on: host.surface, muted: true, aspectFill: false)
             try await eventually("VLC did not decode video from the authenticated RTSP socket.", seconds: 20) {
                 session.pollVideoProgress()
@@ -55,6 +60,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
             XCTAssertFalse(probe.failed)
             try await retire(session, fixture: fixture)
         } catch {
+            recordFailure(error, fixture: fixture)
             fixture.stop()
             session.retire()
             throw error
@@ -64,6 +70,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
     @MainActor
     func testWrongDigestPasswordIsRejectedWithoutStartingVideo() async throws {
         let fixture = RTSPLoopbackFixture(password: fixturePassword)
+        defer { attachTimeline(fixture, name: "rtsp-wrong-password-phases") }
         try await fixture.start()
         defer { fixture.stop() }
         let host = try VideoHost()
@@ -73,7 +80,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
         let probe = PlaybackProbe()
         session.onEvent = { event in
             switch event {
-            case .videoPlaying: probe.videoStarted = true
+            case .videoPlaying, .firstFrame: probe.videoStarted = true
             case .failed, .ended: probe.failed = true
             default: break
             }
@@ -89,6 +96,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
             XCTAssertFalse(probe.videoStarted)
             try await retire(session, fixture: fixture)
         } catch {
+            recordFailure(error, fixture: fixture)
             fixture.stop()
             session.retire()
             throw error
@@ -99,6 +107,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
     func testSlowRTSPSetupExceedingOldWatchdogStillReachesPlaying() async throws {
         let fixture = RTSPLoopbackFixture(password: fixturePassword, behavior: .delayedSetup(seconds: 22),
                                           video: try await RTSPH264Pattern.make())
+        defer { attachTimeline(fixture, name: "rtsp-delayed-setup-phases") }
         try await fixture.start()
         defer { fixture.stop() }
         let host = try VideoHost()
@@ -106,17 +115,20 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
         let player = CameraPlayer(configuration: try configuration(for: fixture), password: fixturePassword)
         do {
             player.attach(to: host.surface)
+            fixture.mark("CameraPlayer play requested")
             player.play()
             try await eventually("The client never reached RTSP SETUP.", seconds: 15) { fixture.setupRequests > 0 }
             try await eventually("A 22-second RTSP setup was cancelled instead of reaching real video.", seconds: 35) {
                 player.state == .playing
             }
+            fixture.mark("CameraPlayer reached playing")
             XCTAssertEqual(fixture.connectionCount, 1, "A slow but valid handshake must not trigger a replacement connection.")
             XCTAssertEqual(fixture.playRequests, 1)
             XCTAssertEqual(fixture.teardownRequests, 0, "The startup watchdog must not tear down before the first frame.")
             XCTAssertGreaterThan(fixture.sentVideoPackets, 0)
             try await stop(player, fixture: fixture)
         } catch {
+            recordFailure(error, fixture: fixture)
             fixture.stop()
             player.stop()
             throw error
@@ -126,6 +138,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
     @MainActor
     func testRapidControlsAndCancellationOfStalledRTSPKeepMainActorResponsive() async throws {
         let fixture = RTSPLoopbackFixture(password: fixturePassword, behavior: .stalledHandshake)
+        defer { attachTimeline(fixture, name: "rtsp-cancellation-phases") }
         try await fixture.start()
         defer { fixture.stop() }
         let host = try VideoHost()
@@ -150,17 +163,35 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
             let started = ProcessInfo.processInfo.systemUptime
             player.stop()
             let synchronousStopTime = ProcessInfo.processInfo.systemUptime - started
+            fixture.mark(String(format: "synchronous stop returned in %.3fs", synchronousStopTime))
             XCTAssertEqual(player.state, .idle)
             try await stop(player, fixture: fixture)
+            fixture.mark(String(format: "main actor heartbeat maximum gap %.3fs; ticks %d", pulse.maximumGap, pulse.ticks))
             XCTAssertLessThan(synchronousStopTime, 0.75, "Stopping an unresponsive camera must not block the UI thread.")
             XCTAssertLessThan(pulse.maximumGap, 0.75, "Rapid controls or SDK teardown blocked the main actor heartbeat.")
             XCTAssertGreaterThan(pulse.ticks, 6)
             XCTAssertEqual(player.state, .idle)
         } catch {
+            recordFailure(error, fixture: fixture)
             fixture.stop()
             player.stop()
             throw error
         }
+    }
+
+    @MainActor
+    private func attachTimeline(_ fixture: RTSPLoopbackFixture, name: String) {
+        let attachment = XCTAttachment(string: fixture.diagnostics)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    private func recordFailure(_ error: Error, fixture: RTSPLoopbackFixture) {
+        let message = "RTSP integration failure: \(error.localizedDescription)"
+        fixture.mark(message)
+        XCTFail(message)
     }
 
     @MainActor
@@ -181,9 +212,11 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
     @MainActor
     private func retire(_ session: VLCPlaybackSession, fixture: RTSPLoopbackFixture) async throws {
         let completion = PlaybackProbe()
+        fixture.mark("native retirement requested")
         session.retire { completion.retired = true }
         do {
             try await eventually("VLC did not complete real RTSP teardown within 6 seconds.", seconds: 6) { completion.retired }
+            fixture.mark("native retirement completed")
         } catch {
             // Close only after the deadline, so fixture shutdown cannot make an
             // ineffective client cancellation falsely pass the assertion.
@@ -196,9 +229,11 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
     @MainActor
     private func stop(_ player: CameraPlayer, fixture: RTSPLoopbackFixture) async throws {
         let completion = PlaybackProbe()
+        fixture.mark("CameraPlayer stopAndWait requested")
         Task { @MainActor in await player.stopAndWait(); completion.retired = true }
         do {
             try await eventually("CameraPlayer did not complete cancellation of a real RTSP connection within 6 seconds.", seconds: 6) { completion.retired }
+            fixture.mark("CameraPlayer stopAndWait completed")
         } catch {
             fixture.stop()
             try? await eventually("Cleanup", seconds: 3) { completion.retired }
