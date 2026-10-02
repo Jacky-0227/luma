@@ -32,6 +32,15 @@ Download packages and read the validation scope for each version in [Releases](h
 <p align="center"><sub>Actual iOS 26 simulator screenshots · No real camera footage or personal device data</sub></p>
 
 <details>
+<summary>Custom dashboards · grouping and camera order</summary>
+<p align="center">
+  <img src="docs/assets/dashboard-groups-en.png" width="250" alt="Custom dashboard groups with snapshot placeholders">
+  <img src="docs/assets/dashboard-editor-en.png" width="250" alt="Dashboard editor showing camera selection, order and layout">
+</p>
+Actual 0.1.2 simulator screens. The synthetic test cameras are offline, so the covers show placeholders.
+</details>
+
+<details>
 <summary>PTZ controls · offline demonstration</summary>
 <p align="center"><img src="docs/assets/ptz-en.png" width="300" alt="Eight-direction PTZ controls with stop and zoom"></p>
 The test camera is intentionally offline. This screenshot demonstrates the controls, not a successful connection to a real camera.

@@ -43,6 +43,15 @@ Luma 是一款面向 **iOS 26 及以上版本**的區域網路攝影機檢視器
 以上為 iOS 26 模擬器的真實介面截圖，不含真實攝影機畫面。
 
 <details>
+<summary>自訂儀表板 · 分組與攝影機排序</summary>
+<p align="center">
+  <img src="docs/assets/dashboard-groups-en.png" width="250" alt="自訂儀表板分組，封面為離線預留圖示">
+  <img src="docs/assets/dashboard-editor-en.png" width="250" alt="儀表板編輯頁的攝影機選擇、順序與版面">
+</p>
+0.1.2 模擬器實際截圖。測試攝影機處於離線狀態，封面顯示預留圖示，不包含真實監控畫面。
+</details>
+
+<details>
 <summary>查看雲台控制 · 離線示範</summary>
 <p align="center"><img src="docs/assets/ptz-en.png" width="300" alt="八方向、停止與變焦雲台控制"></p>
 測試設備刻意保持離線，圖片用於展示控制介面，不代表已連接真實攝影機。

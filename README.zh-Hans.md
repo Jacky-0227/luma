@@ -40,6 +40,15 @@ Luma 是面向 **iOS 26 及以上**的局域网摄像头查看器，使用 Swift
 <a id="features"></a>
 
 <details>
+<summary>自定义仪表板 · 分组与摄像头排序</summary>
+<p align="center">
+  <img src="docs/assets/dashboard-groups-en.png" width="250" alt="自定义仪表板分组，封面为离线占位图">
+  <img src="docs/assets/dashboard-editor-en.png" width="250" alt="仪表板编辑页的摄像头选择、顺序与布局">
+</p>
+0.1.2 模拟器实际截屏。测试摄像头处于离线状态，封面显示占位图，不包含真实监控画面。
+</details>
+
+<details>
 <summary>查看云台控制 · 离线演示</summary>
 <p align="center"><img src="docs/assets/ptz-en.png" width="300" alt="八方向、停止与变焦云台控制"></p>
 测试设备刻意保持离线，图片用于展示控制界面，不代表已连接真实摄像头。
