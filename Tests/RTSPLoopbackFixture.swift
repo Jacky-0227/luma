@@ -230,9 +230,15 @@ final class RTSPLoopbackFixture {
             fields[text.substring(with: match.range(at: 1)).lowercased()] = text.substring(with: value)
         }
         guard fields["username"] == username, fields["realm"] == realm,
-              fields["nonce"] == nonce, fields["uri"] == target else { return false }
+              fields["nonce"] == nonce, let digestURI = fields["uri"] else { return false }
+        // LIVE555 authenticates SETUP using the presentation's base URL even
+        // when the request targets its SDP track. Accept only this fixture's
+        // known presentation/track URLs and still verify the password digest.
+        let presentation = "rtsp://127.0.0.1:\(port ?? 0)/Streaming/Channels/102/"
+        guard digestURI == target || (method == "SETUP" && target == presentation + "trackID=0"
+                                      && digestURI == presentation) else { return false }
         let a1 = Self.md5("\(username):\(realm):\(password)")
-        let a2 = Self.md5("\(method):\(target)")
+        let a2 = Self.md5("\(method):\(digestURI)")
         let expected = Self.md5("\(a1):\(nonce):\(a2)")
         return fields["response"]?.lowercased() == expected
     }

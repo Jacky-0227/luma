@@ -102,6 +102,7 @@ private struct LiveCameraView: View {
     let ptzDiscovery: PTZDiscoveryResult?
     let retryControls: () -> Void
     @State private var fullscreen = false
+    @State private var zoomResetID = UUID()
     @State private var showingPTZ = false
     @State private var isVisible = false
 
@@ -231,8 +232,7 @@ private struct LiveCameraView: View {
     private var videoStage: some View {
         ZStack {
             Color.black
-            VideoSurface(player: player)
-                .accessibilityLabel(Text("Camera video"))
+            ZoomableVideoSurface(player: player, isZoomEnabled: fullscreen, resetID: zoomResetID)
             playbackOverlay
         }
         .overlay(alignment: .topLeading) {
@@ -248,6 +248,14 @@ private struct LiveCameraView: View {
         .overlay(alignment: .bottomTrailing) {
             GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
+                    if fullscreen {
+                        Button { zoomResetID = UUID() } label: {
+                            Text("1×").font(.subheadline.monospacedDigit().weight(.semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .accessibilityLabel(Text("Reset digital zoom"))
+                        .accessibilityIdentifier("player.zoom.reset")
+                    }
                     if ptz != nil && fullscreen {
                         Button { showingPTZ = true } label: {
                             Image(systemName: "move.3d").frame(width: 32, height: 32)

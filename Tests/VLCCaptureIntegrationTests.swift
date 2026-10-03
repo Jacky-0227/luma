@@ -24,10 +24,13 @@ final class VLCCaptureIntegrationTests: XCTestCase {
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
-        let video = UIView(frame: controller.view.bounds)
-        video.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        video.backgroundColor = .black
-        controller.view.addSubview(video)
+        let viewport = ZoomableCameraVideoView()
+        viewport.frame = controller.view.bounds
+        viewport.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        controller.view.addSubview(viewport)
+        viewport.layoutIfNeeded()
+        viewport.configure(enabled: true, resetID: UUID())
+        let video = viewport.videoView
         defer {
             window.isHidden = true
             previousWindow?.makeKeyAndVisible()
@@ -62,6 +65,7 @@ final class VLCCaptureIntegrationTests: XCTestCase {
             session.start(on: video, muted: true, aspectFill: false)
             try await waitFor("VLC did not confirm a decoded or displayed video frame", probe: probe) { probe.firstFrameReceived }
             XCTAssertTrue(probe.videoStarted, "First-frame evidence must also publish the normal video-playing event for local library consumers.")
+            viewport.setZoomScale(2, animated: false)
             probe.phase = "preview and queued manual snapshot"
             let previewCamera = CameraConfiguration(name: "Synthetic preview", host: "192.0.2.90")
             let thumbnails = CameraThumbnailStore(directory: directory.appendingPathComponent("thumbnails"),
@@ -71,7 +75,11 @@ final class VLCCaptureIntegrationTests: XCTestCase {
             session.capturePreview(at: previewCapture.fileURL) { success in
                 probe.previewCompletions += 1
                 probe.previewSucceeded = success
-                if !success { probe.failure = "VLC could not capture the separate camera-card preview." }
+                if !success {
+                    let exists = FileManager.default.fileExists(atPath: previewCapture.fileURL.path)
+                    let decodes = UIImage(contentsOfFile: previewCapture.fileURL.path) != nil
+                    probe.failure = "VLC could not capture the separate camera-card preview. fileExists=\(exists), decodable=\(decodes)"
+                }
             }
             // This is intentionally immediate: the automatic snapshot owns the
             // SDK's single snapshot destination while a user requests a capture.

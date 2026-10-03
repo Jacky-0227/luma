@@ -58,6 +58,12 @@ struct LumaApp: App {
                 .appendingPathComponent("LumaUITests-\(UUID().uuidString)", isDirectory: true)
                 .appendingPathComponent("cameras.json")
             let store = CameraStore(storageURL: location, credentials: UITestCredentials())
+            if arguments.contains("--ui-test-stream"),
+               let port = ProcessInfo.processInfo.environment["LUMA_UI_RTSP_PORT"].flatMap(Int.init),
+               (1...65535).contains(port) {
+                let camera = CameraConfiguration(name: "Zoom test", host: "127.0.0.1", port: port, username: "viewer")
+                try? store.save(camera, password: "luma-ui-fixture")
+            }
             if arguments.contains("--ui-test-wall") {
                 // Isolated UI fixtures; no user devices, accounts or saved data.
                 for index in 1...16 {

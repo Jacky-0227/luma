@@ -15,7 +15,7 @@ final class DashboardUITests: XCTestCase {
             let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.card.")).firstMatch
             XCTAssertTrue(card.waitForExistence(timeout: 8))
             card.tap()
-            let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.camera."))
+            let tiles = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.camera."))
             waitFor(NSPredicate(format: "count == %d", count), on: tiles)
             let frames = tiles.allElementsBoundByIndex.map(\.frame)
             for frame in frames {
@@ -110,7 +110,7 @@ final class DashboardUITests: XCTestCase {
         XCTAssertEqual(renamed.label, "Courtyard")
 
         renamed.tap()
-        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.camera."))
+        let tiles = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.camera."))
         XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 8))
         XCTAssertEqual(tiles.count, 2)
         for tile in tiles.allElementsBoundByIndex {

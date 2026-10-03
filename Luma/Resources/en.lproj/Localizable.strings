@@ -66,6 +66,8 @@
 "Preparing live view…" = "Preparing live view…";
 "Live view pauses when Luma is in the background." = "Live view pauses when Luma is in the background.";
 "Camera video" = "Camera video";
+"Reset digital zoom" = "Reset digital zoom";
+"Pinch to zoom, then drag to look around." = "Pinch to zoom, then drag to look around.";
 "Enable sound" = "Enable sound";
 "Mute" = "Mute";
 "Exit full screen" = "Exit full screen";

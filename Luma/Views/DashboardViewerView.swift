@@ -41,12 +41,18 @@ struct DashboardViewerView: View {
     }
 
     private var content: some View {
+        GeometryReader { geometry in
+            dashboardContent(width: max(1, geometry.size.width - 16))
+        }
+    }
+
+    private func dashboardContent(width: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if selectedCameras.isEmpty {
                     ContentUnavailableView("No cameras yet", systemImage: "square.grid.2x2", description: Text("Add a camera from the home screen to use the dashboard."))
                 } else {
-                    cameraGrid
+                    cameraGrid(width: width)
                     if pageCount > 1 { pageControls }
                 }
             }
@@ -98,19 +104,23 @@ struct DashboardViewerView: View {
         }
     }
 
-    private var cameraGrid: some View {
+    private func cameraGrid(width: CGFloat) -> some View {
         // Keep drawable identities stable while scrolling. The selected page
         // owns its streams; changing pages retires all of them before replacing.
         Grid(alignment: .top, horizontalSpacing: 4, verticalSpacing: 4) {
             ForEach(cameraRows) { row in
                 GridRow {
-                    ForEach(row.cameras) { camera in cameraButton(camera) }
+                    ForEach(row.cameras) { camera in
+                        cameraButton(camera)
+                            .frame(width: max(1, (width - CGFloat(columnCount - 1) * 4) / CGFloat(columnCount)))
+                    }
                     ForEach(0..<(columnCount - row.cameras.count), id: \.self) { _ in
                         Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                     }
                 }
             }
         }
+        .frame(width: width, alignment: .leading)
         .overlay {
             if session.isTransitioning || isOpeningCamera {
                 ProgressView("Preparing views…")
@@ -128,6 +138,7 @@ struct DashboardViewerView: View {
         .buttonStyle(.plain)
         .disabled(isOpeningCamera || session.isTransitioning)
         .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityLabel(Text(camera.configuration.name))
         .accessibilityValue(Text(camera.player.map { DashboardCameraTile.status(for: $0.state) } ?? String(localized: "Connection unavailable")))
         .accessibilityHint(Text("Open live view"))

@@ -67,6 +67,8 @@ targets:
     platform: iOS
     sources:
       - path: UITests
+      - path: Tests/RTSPLoopbackFixture.swift
+      - path: Tests/RTSPH264Pattern.swift
     dependencies:
       - target: Luma
     settings:

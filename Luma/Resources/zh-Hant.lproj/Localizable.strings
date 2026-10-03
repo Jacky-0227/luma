@@ -260,3 +260,5 @@
 "Fluent streams, sound off. Every view keeps its original proportions." = "使用流暢畫質並靜音，所有畫面均保持原始比例。";
 
 "PTZ access was denied. Check the device username, password, and PTZ permissions; live view can continue." = "設備拒絕了雲台存取。請檢查設備使用者名稱、密碼及雲台權限；即時畫面可繼續播放。";
+"Reset digital zoom" = "恢復原始畫面";
+"Pinch to zoom, then drag to look around." = "雙指縮放，放大後拖動檢視。";

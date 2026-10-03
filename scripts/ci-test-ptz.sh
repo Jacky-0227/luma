@@ -23,10 +23,11 @@ if [ "${1:-}" != '--ptz-only' ]; then
     LumaTests/CameraThumbnailStoreTests
     LumaTests/VLCCaptureIntegrationTests
     LumaTests/RTSPPlaybackIntegrationTests
+    LumaTests/DigitalZoomTests
   )
   TEST_SCOPE="$TEST_SCOPE + camera persistence/backup + dashboard store/session/preview + local thumbnail store/real VLC capture"
   if [ "${1:-}" != '--unit-only' ]; then
-    TEST_SUITES+=(LumaUITests/DashboardUITests LumaUITests/WelcomeUITests)
+    TEST_SUITES+=(LumaUITests/DashboardUITests LumaUITests/WelcomeUITests LumaUITests/DigitalZoomUITests)
     TEST_SCOPE="$TEST_SCOPE + dashboard editor/first-launch welcome UI"
   fi
 fi
