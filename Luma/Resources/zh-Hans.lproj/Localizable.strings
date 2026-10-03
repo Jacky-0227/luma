@@ -249,3 +249,5 @@
 "More live views use more network bandwidth and device resources." = "同时播放更多画面会增加网络带宽和设备资源占用。";
 "The first page of cameras appears on the dashboard cover." = "第一页的摄像头会显示在仪表板封面上。";
 "Fluent streams, sound off. Every view keeps its original proportions." = "使用流畅画质并静音，所有画面均保持原始比例。";
+
+"PTZ access was denied. Check the device username, password, and PTZ permissions; live view can continue." = "设备拒绝了云台访问。请检查设备用户名、密码和云台权限；实时画面可继续播放。";

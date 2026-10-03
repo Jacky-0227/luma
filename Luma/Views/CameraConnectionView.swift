@@ -193,6 +193,9 @@ private struct LiveCameraView: View {
             case .unknown:
                 Label("PTZ detection is unavailable. Check the control port and device account; live view can continue.", systemImage: "info.circle")
                     .font(.footnote).foregroundStyle(.secondary)
+            case .permissionDenied:
+                Label("PTZ access was denied. Check the device username, password, and PTZ permissions; live view can continue.", systemImage: "lock.circle")
+                    .font(.footnote).foregroundStyle(.secondary)
             case .unsupported:
                 Label("PTZ was detected, but this device's movement method is not supported yet.", systemImage: "move.3d")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -209,7 +212,7 @@ private struct LiveCameraView: View {
 
     private var canRetryControlDetection: Bool {
         switch ptzDiscovery {
-        case .unknown, .unavailable, .unsupported: true
+        case .unknown, .unavailable, .unsupported, .permissionDenied: true
         case nil, .available: false
         }
     }

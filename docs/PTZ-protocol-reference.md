@@ -2,6 +2,8 @@
 
 Research reviewed on 2026-10-03. This is a protocol coverage map, not a list of certified camera models. Implementation details and device-test limits are recorded in [PTZ compatibility](PTZ-compatibility.md).
 
+Comparative source review / 實作對照 / 实现对照: [Scrypted Hikvision](https://github.com/koush/scrypted/blob/main/plugins/hikvision/src/hikvision-camera-api.ts), [Home Assistant ONVIF](https://github.com/home-assistant/core/blob/dev/homeassistant/components/onvif/device.py), [Frigate ONVIF](https://github.com/blakeblackshear/frigate/blob/dev/frigate/ptz/onvif.py). These implementations were inspected for authentication reuse, movement/stop sequencing and profile mapping. They are comparisons, not protocol guarantees; fixed channels, intentional movement delays or omitted stop axes must not be copied blindly. 已對照驗證重用、停止順序與通道對應，不直接複製固定通道或省略停止軸的假設。已对照认证复用、停止顺序与通道映射，不直接复制固定通道或省略停止轴的假设。
+
 ## English
 
 | Family / capability | Evidence and integration requirement | Luma 0.1.3 |

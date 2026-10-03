@@ -75,12 +75,12 @@ final class PTZDiscoveryTests: XCTestCase {
         let legacyList = Data("<PTZChannelList xmlns=\"http://www.hikvision.com/ver10/XMLSchema\"><PTZChannel><id>7</id><videoInputID>3</videoInputID><enabled>true</enabled><panSupport>true</panSupport><tiltSupport>true</tiltSupport><zoomSupport>false</zoomSupport></PTZChannel></PTZChannelList>".utf8)
         let transport = CapabilityHTTPTransport([
             (.channels, 200, unsupported), (.capabilities(3), 400, unsupported), (.configuration(3), 404, Data()),
-            (.legacyChannels, 200, legacyList), (.legacyCapabilities(7), 404, Data())
+            (.legacyChannels, 200, legacyList), (.legacyCapabilities(7), 404, Data()), (.legacyConfiguration(7), 404, Data())
         ])
         let camera = CameraConfiguration(name: "Test", host: "camera.local", channel: 3)
         let result = try await PTZCapabilityDetector.detect(configuration: camera, transport: transport)
         XCTAssertEqual(result, .available(PTZCapabilities(channel: 7, panMode: .continuous, tiltMode: .continuous, zoomMode: nil, apiFamily: .legacy)))
-        XCTAssertEqual(transport.requests, [.channels, .capabilities(3), .configuration(3), .legacyChannels, .legacyCapabilities(7)])
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(3), .configuration(3), .legacyChannels, .legacyCapabilities(7), .legacyConfiguration(7)])
     }
 
     @MainActor
@@ -97,12 +97,16 @@ final class PTZDiscoveryTests: XCTestCase {
 
     @MainActor
     func testPermissionAmbiguousStatusMalformedAndNegativeEvidenceDoNotFallBackToLegacy() async throws {
-        for entry in [(200, Self.responseStatus(code: 4)), (400, Self.responseStatus(code: 4, subcode: "lowPrivilege")),
-                      (200, Data("<html>Sign in</html>".utf8))] {
+        let cases: [(Int, Data, PTZDiscoveryResult)] = [
+            (200, Self.responseStatus(code: 4), .unknown),
+            (400, Self.responseStatus(code: 4, subcode: "lowPrivilege"), .permissionDenied),
+            (200, Data("<html>Sign in</html>".utf8), .unknown)
+        ]
+        for entry in cases {
             let transport = CapabilityHTTPTransport([(.channels, entry.0, entry.1)])
             let discovery = PTZDiscovery { _, _ in transport }
             let result = try await discovery.detect(configuration: Self.camera, password: "synthetic")
-            XCTAssertEqual(result, .unknown)
+            XCTAssertEqual(result, entry.2)
             XCTAssertEqual(transport.requests, [.channels])
         }
         let disabled = Data("<PTZChannelList><PTZChannel><id>1</id><enabled>false</enabled></PTZChannel></PTZChannelList>".utf8)
@@ -118,7 +122,7 @@ final class PTZDiscoveryTests: XCTestCase {
         let transport = CapabilityTransport(channels: [1], capability: detail)
         let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
         XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: nil, zoomMode: .continuous)))
-        XCTAssertEqual(transport.requests, [.channels, .capabilities(1)])
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
         let mismatch = Data(String(decoding: detail, as: UTF8.self).replacingOccurrences(of: "<videoInputID>1</videoInputID>", with: "<videoInputID>2</videoInputID>").utf8)
         XCTAssertEqual(try PTZCapabilityDocument.capabilityResponse(mismatch, channel: 1, videoChannel: 1, configuration: nil, apiFamily: .legacy), .unknown)
         let noAxes = Data("<PTZChannel><id>1</id><enabled>true</enabled><panMaxSpeed>300</panMaxSpeed><tiltMaxSpeed>200</tiltMaxSpeed></PTZChannel>".utf8)
@@ -221,11 +225,11 @@ final class PTZDiscoveryTests: XCTestCase {
         transport.capabilityError = .unsupported
         let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
         XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: nil)))
-        XCTAssertEqual(transport.requests, [.channels, .capabilities(1)])
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
         transport.capabilityError = .permissionDenied
         let discovery = PTZDiscovery { _, _ in transport }
         let denied = try await discovery.detect(configuration: Self.camera, password: "synthetic-test-password")
-        XCTAssertEqual(denied, .unknown, "A permission error must not be treated as an absent firmware route.")
+        XCTAssertEqual(denied, .permissionDenied, "A permission error must not be treated as an absent firmware route.")
     }
 
     @MainActor
@@ -264,6 +268,53 @@ final class PTZDiscoveryTests: XCTestCase {
         transport.configurationXML = Data("<PTZChannel><id>4</id><videoInputID>2</videoInputID><panSupport>true</panSupport></PTZChannel>".utf8)
         let mismatch = try await PTZCapabilityDetector.detect(configuration: camera, transport: transport)
         XCTAssertEqual(mismatch, .unknown, "Never offer controls for a different video input.")
+    }
+
+    @MainActor
+    func testPartialPositiveCollectionReadsDetailAndPreservesKnownZoomSupport() async throws {
+        for capability in [Data("<PTZChanelCap/>".utf8),
+                           Data("<PTZChanelCap><AbsolutePanTiltPositionSpace><XRange><Min>0</Min><Max>3600</Max></XRange></AbsolutePanTiltPositionSpace></PTZChanelCap>".utf8)] {
+            let transport = CapabilityTransport(channels: [1], capability: capability)
+            transport.channelXML = Data("<PTZChannelList><PTZChannel><id>1</id><zoomSupport>true</zoomSupport></PTZChannel></PTZChannelList>".utf8)
+            transport.configurationXML = Data("<PTZChannel><id>1</id><videoInputID>1</videoInputID><panSupport>true</panSupport><tiltSupport>true</tiltSupport></PTZChannel>".utf8)
+            let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+            XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: .continuous)))
+            XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
+            transport.configurationXML = nil
+            let withoutDetail = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+            XCTAssertEqual(withoutDetail, .available(PTZCapabilities(channel: 1, panMode: nil, tiltMode: nil, zoomMode: .continuous)), "An unsupported detail route must preserve existing positive evidence.")
+        }
+    }
+
+    @MainActor
+    func testPartialNegativeCollectionReadsDetailWithoutErasingItsExplicitDenial() async throws {
+        let transport = CapabilityTransport(channels: [1], capability: Data("<PTZChanelCap/>".utf8))
+        transport.channelXML = Data("<PTZChannelList><PTZChannel><id>1</id><zoomSupport>false</zoomSupport></PTZChannel></PTZChannelList>".utf8)
+        transport.configurationXML = Data("<PTZChannel><id>1</id><panSupport>true</panSupport><tiltSupport>true</tiltSupport><zoomSupport>true</zoomSupport></PTZChannel>".utf8)
+        let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+        XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: nil)))
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
+    }
+
+    @MainActor
+    func testPartialAvailableCapabilityRetainsContinuousVetoWhenDetailAddsAxes() async throws {
+        let capability = Data("<PTZChanelCap><notSupportPTZContinuous>true</notSupportPTZContinuous><MomentaryZoomSpace><ZRange><Min>-1</Min><Max>1</Max></ZRange></MomentaryZoomSpace></PTZChanelCap>".utf8)
+        let transport = CapabilityTransport(channels: [1], capability: capability)
+        transport.channelXML = Data("<PTZChannelList><PTZChannel><id>1</id><zoomSupport>true</zoomSupport></PTZChannel></PTZChannelList>".utf8)
+        transport.configurationXML = Data("<PTZChannel><id>1</id><panSupport>true</panSupport><tiltSupport>true</tiltSupport><zoomSupport>true</zoomSupport></PTZChannel>".utf8)
+        let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+        XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: nil, tiltMode: nil, zoomMode: .momentary, supportsContinuousStop: false)))
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
+    }
+
+    @MainActor
+    func testPartialEvidenceDoesNotBypassDeniedDetailOrSelectAnotherFamily() async throws {
+        let partial = Data("<PTZChannelList><PTZChannel><id>1</id><zoomSupport>true</zoomSupport></PTZChannel></PTZChannelList>".utf8)
+        let transport = CapabilityHTTPTransport([(.channels, 200, partial), (.capabilities(1), 200, Data("<PTZChanelCap/>".utf8)), (.configuration(1), 403, Data())])
+        let discovery = PTZDiscovery { _, _ in transport }
+        let result = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+        XCTAssertEqual(result, .permissionDenied)
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
     }
 
     @MainActor
@@ -334,7 +385,7 @@ final class PTZDiscoveryTests: XCTestCase {
     @MainActor
     func testFailedDetectionIsUnknownAndDoesNotFloodRepeatedOpens() async throws {
         let transport = CapabilityTransport(channels: [1], capability: Self.timedCapabilities)
-        transport.collectionError = .permissionDenied
+        transport.collectionError = .connectionFailed
         let discovery = PTZDiscovery { _, _ in transport }
         let first = try await discovery.detect(configuration: Self.camera, password: "test")
         let second = try await discovery.detect(configuration: Self.camera, password: "test")
@@ -346,12 +397,46 @@ final class PTZDiscoveryTests: XCTestCase {
     }
 
     @MainActor
+    func testHTTPAndApplicationPermissionDenialsRemainDistinctAndNeverTryAnotherRoute() async throws {
+        for entry in [(401, Data()), (403, Data()),
+                      (200, Self.responseStatus(code: 4, subcode: "lowPrivilege")),
+                      (400, Self.responseStatus(code: 4, subcode: "badAuthorization"))] {
+            let transport = CapabilityHTTPTransport([(.channels, entry.0, entry.1)])
+            let discovery = PTZDiscovery { _, _ in transport }
+            let first = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+            let cached = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+            XCTAssertEqual(first, .permissionDenied)
+            XCTAssertEqual(cached, .permissionDenied)
+            XCTAssertEqual(transport.requests, [.channels], "Permission denial must not fall back to capabilities, configuration, or a legacy route.")
+        }
+        XCTAssertEqual(PTZDiscoveryResult.permissionDenied.cacheDuration, 15)
+    }
+
+    @MainActor
+    func testPermissionDenialCacheCanBeExplicitlyRetriedWithoutKeepingAStaleFailure() async throws {
+        let transport = CapabilityTransport(channels: [1], capability: Self.continuousCapabilities)
+        transport.collectionError = .permissionDenied
+        let discovery = PTZDiscovery { _, _ in transport }
+        let denied = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+        XCTAssertEqual(denied, .permissionDenied)
+        transport.collectionError = nil
+        let cached = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+        XCTAssertEqual(cached, .permissionDenied)
+        XCTAssertEqual(transport.requests, [.channels])
+        let retried = try await discovery.detect(configuration: Self.camera, password: "synthetic", forceRefresh: true)
+        XCTAssertEqual(retried, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: .continuous)))
+        let resolved = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+        XCTAssertEqual(resolved, retried)
+        XCTAssertEqual(transport.requests, [.channels, .channels, .capabilities(1)])
+    }
+
+    @MainActor
     func testExplicitRetryBypassesCachedFailureButJoinsAnInFlightRead() async throws {
         let transport = CapabilityTransport(channels: [1], capability: Self.continuousCapabilities)
         transport.collectionError = .permissionDenied
         let discovery = PTZDiscovery { _, _ in transport }
         let failed = try await discovery.detect(configuration: Self.camera, password: "test")
-        XCTAssertEqual(failed, .unknown)
+        XCTAssertEqual(failed, .permissionDenied)
         transport.collectionError = nil
         transport.blockCollection = true
         let first = Task { @MainActor in try await discovery.detect(configuration: Self.camera, password: "test", forceRefresh: true) }

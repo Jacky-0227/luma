@@ -17,7 +17,9 @@ enum PTZResponseDocument {
             throw PTZError.invalidResponse
         }
         let subcode = try field("subStatusCode", in: root)?.lowercased()
-        if number == 1, subcode == nil || subcode == "ok" { return .success }
+        // Hikvision PTZ documents use both 0#OK and 1#OK. A conflicting
+        // substatus must still reject the command instead of claiming success.
+        if number == 0 || number == 1, subcode == nil || subcode == "ok" { return .success }
         guard number == 4 else { throw PTZError.invalidResponse }
         switch subcode {
         case "notsupport", "methodnotallowed": throw PTZError.unsupported

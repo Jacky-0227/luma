@@ -112,6 +112,23 @@ final class PTZTests: XCTestCase {
         XCTAssertThrowsError(try PTZResponse.validate(statusCode: 200, body: Data("<html>Login</html>".utf8)))
     }
 
+    func testDocumentedZeroAndOneSuccessCodesRequireConsistentSubstatus() throws {
+        for root in ["ResponseStatus", "ResponseStaus"] {
+            for code in [0, 1] {
+                for substatus in ["", "<subStatusCode>OK</subStatusCode>", "<subStatusCode>ok</subStatusCode>"] {
+                    let data = Data("<\(root)><statusCode>\(code)</statusCode>\(substatus)</\(root)>".utf8)
+                    XCTAssertEqual(try PTZResponseDocument.validate(data), .success)
+                    XCTAssertNoThrow(try PTZResponse.validate(statusCode: 200, body: data))
+                }
+                for substatus in ["notSupport", "badAuthorization", "unknown"] {
+                    let data = Data("<\(root)><statusCode>\(code)</statusCode><subStatusCode>\(substatus)</subStatusCode></\(root)>".utf8)
+                    XCTAssertThrowsError(try PTZResponseDocument.validate(data))
+                    XCTAssertThrowsError(try PTZResponse.validate(statusCode: 200, body: data))
+                }
+            }
+        }
+    }
+
     @MainActor
     func testReleaseBeforeMovementTaskStartsNeverSendsTheObsoleteMove() async throws {
         let transport = RecordingPTZTransport()

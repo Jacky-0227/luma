@@ -8,7 +8,7 @@ final class PTZTouchControl: UIButton {
     var onPress: (() -> Void)?
     var onRelease: (() -> Void)?
     var onActivate: (() -> Void)?
-    private var isHeld = false
+    private var hasActiveHold = false
     private var scrollIDs: [ObjectIdentifier] = []
 
     override init(frame: CGRect) {
@@ -26,14 +26,14 @@ final class PTZTouchControl: UIButton {
     }
 
     @objc private func press() {
-        guard isEnabled, !isHeld else { return }
-        isHeld = true
+        guard isEnabled, !hasActiveHold else { return }
+        hasActiveHold = true
         onPress?()
     }
 
     @objc func releaseHold() {
-        guard isHeld else { return }
-        isHeld = false
+        guard hasActiveHold else { return }
+        hasActiveHold = false
         onRelease?()
     }
 

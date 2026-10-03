@@ -46,6 +46,7 @@ enum PTZDiscoveryResult: Equatable, Sendable {
     case unavailable
     case unsupported
     case unknown
+    case permissionDenied
 
     var cacheDuration: TimeInterval {
         if case .available = self { return 300 }
@@ -157,7 +158,6 @@ enum PTZCapabilityDocument {
         let tiltSupport: Bool?
         let zoomSupport: Bool?
 
-        var hasAxisFlags: Bool { panSupport != nil || tiltSupport != nil || zoomSupport != nil }
     }
 
     static func channels(_ data: Data) throws -> [Channel] {
@@ -204,17 +204,22 @@ enum PTZCapabilityDocument {
         }
         let detail = try self.configuration(root)
         guard detail.id == channel, detail.videoInputID == nil || detail.videoInputID == videoChannel else { return .unknown }
-        func merged(_ first: Bool?, _ second: Bool?) -> Bool? {
+        return channelCapabilities(merging(configuration, with: detail), channel: channel, apiFamily: apiFamily)
+    }
+
+    /// Callers verify channel/input identity before combining documents. A
+    /// partial later document must not erase an earlier explicit axis denial.
+    static func merging(_ first: Channel?, with second: Channel) -> Channel {
+        func axis(_ first: Bool?, _ second: Bool?) -> Bool? {
             if first == false || second == false { return false }
             if first == true || second == true { return true }
             return nil
         }
-        let combined = Channel(id: channel, videoInputID: detail.videoInputID,
-                               enabled: detail.enabled && configuration?.enabled != false,
-                               panSupport: merged(configuration?.panSupport, detail.panSupport),
-                               tiltSupport: merged(configuration?.tiltSupport, detail.tiltSupport),
-                               zoomSupport: merged(configuration?.zoomSupport, detail.zoomSupport))
-        return channelCapabilities(combined, channel: channel, apiFamily: apiFamily)
+        return Channel(id: second.id, videoInputID: second.videoInputID ?? first?.videoInputID,
+                       enabled: second.enabled && first?.enabled != false,
+                       panSupport: axis(first?.panSupport, second.panSupport),
+                       tiltSupport: axis(first?.tiltSupport, second.tiltSupport),
+                       zoomSupport: axis(first?.zoomSupport, second.zoomSupport))
     }
 
     /// Each vendor movement space describes one API, not whether the device is
@@ -374,11 +379,13 @@ enum PTZCapabilityDetector {
             capabilityData = nil
             result = PTZCapabilityDocument.channelCapabilities(channelConfiguration, channel: channel, apiFamily: apiFamily)
         }
-        if case .available = result { return Attempt(result: result) }
+        if case .available(let capability) = result,
+           capability.panMode != nil, capability.tiltMode != nil, capability.zoomMode != nil {
+            return Attempt(result: result)
+        }
         if case .unavailable = result { return Attempt(result: result) }
-        guard channelConfiguration?.hasAxisFlags != true else { return Attempt(result: result) }
-        // Collection firmware sometimes omits axis flags. A precise read of the
-        // same control channel is safe; never enumerate other recorder inputs.
+        // A collection or capability may describe just one axis. Read the same
+        // channel's detail before deciding which remaining axes are unavailable.
         do {
             let data = try await transport.get(PTZDiscoveryResource.configuration(channel).inFamily(apiFamily))
             try Task.checkCancellation()
@@ -386,12 +393,13 @@ enum PTZCapabilityDetector {
             guard detail.id == channel,
                   detail.videoInputID == nil || detail.videoInputID == configuration.channel else { return Attempt(result: .unknown) }
             guard detail.enabled else { return Attempt(result: .unavailable) }
+            let combined = PTZCapabilityDocument.merging(channelConfiguration, with: detail)
             if let capabilityData {
                 // Keep the original continuous veto when merging legacy flags.
                 return Attempt(result: try PTZCapabilityDocument.capabilityResponse(capabilityData, channel: channel,
-                                          videoChannel: configuration.channel, configuration: detail, apiFamily: apiFamily))
+                                          videoChannel: configuration.channel, configuration: combined, apiFamily: apiFamily))
             }
-            return Attempt(result: PTZCapabilityDocument.channelCapabilities(detail, channel: channel, apiFamily: apiFamily))
+            return Attempt(result: PTZCapabilityDocument.channelCapabilities(combined, channel: channel, apiFamily: apiFamily))
         } catch PTZError.unsupported {
             // Do not route around authentication, malformed XML, an explicit
             // negative, an ambiguous channel mapping or an advertised method
@@ -445,6 +453,8 @@ final class PTZDiscovery {
                 let result: PTZDiscoveryResult
                 do {
                     result = try await PTZCapabilityDetector.detect(configuration: camera, transport: factory(camera, password))
+                } catch PTZError.permissionDenied {
+                    result = .permissionDenied
                 } catch { result = .unknown }
                 self.pending[key] = nil
                 if self.cache.count >= 64 { self.cache.removeAll() }
