@@ -18,19 +18,11 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Every angle. Together.")
-                            .font(.title2.weight(.semibold))
-                            .accessibilityAddTraits(.isHeader)
-                        Text("Arrange the views that matter to you.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
                     if dashboards.dashboards.isEmpty {
                         ContentUnavailableView {
-                            Label("Your dashboards", systemImage: "rectangle.split.2x2")
+                            Label("No dashboards yet", systemImage: "rectangle.split.2x2")
                         } description: {
-                            Text("Create a dashboard and bring your cameras together.")
+                            Text("Choose cameras and arrange their layout.")
                         } actions: {
                             Button("Add dashboard", systemImage: "plus") { editor = DashboardEditorRoute() }
                                 .buttonStyle(.glassProminent)
@@ -53,7 +45,7 @@ struct DashboardView: View {
             }
             .background { LumaBackground() }
             .navigationTitle("Dashboard")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Add dashboard", systemImage: "plus") { editor = DashboardEditorRoute() }

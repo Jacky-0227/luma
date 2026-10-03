@@ -86,6 +86,7 @@ final class PTZTouchControl: UIButton {
 /// only when the last button leaves; never modify the app-wide appearance proxy.
 @MainActor
 private enum ScrollTouchDelivery {
+    @MainActor
     final class Entry {
         weak var scroll: UIScrollView?
         let originalDelay: Bool

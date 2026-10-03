@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private struct CameraEditorRoute: Identifiable {
     var camera: CameraConfiguration?
@@ -16,7 +17,6 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    introduction
                     if store.cameras.isEmpty {
                         EmptyCamerasView { editor = CameraEditorRoute() }
                     } else {
@@ -24,14 +24,14 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 24)
+                .padding(.top, 12)
                 .padding(.bottom, 36)
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
             }
             .background { LumaBackground() }
-            .navigationTitle("Luma")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Cameras")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
@@ -66,29 +66,13 @@ struct HomeView: View {
         }
     }
 
-    private var introduction: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("YOUR PRIVATE VIEW")
-                .font(.caption.weight(.semibold))
-                .tracking(2.5)
-                .foregroundStyle(.secondary)
-            Text("Home. Within sight.")
-                .font(.largeTitle.weight(.bold))
-                .fontDesign(.rounded)
-                .accessibilityAddTraits(.isHeader)
-            Text(store.cameras.isEmpty ? String(localized: "A quieter way to keep an eye on home.") : String(localized: "Your cameras, one clear view."))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var cameraCollection: some View {
         LazyVStack(spacing: 18) {
             ForEach(store.cameras) { camera in
                 NavigationLink {
                     CameraConnectionView(configuration: camera, store: store)
                 } label: {
-                    CameraCard(camera: camera)
+                    CameraCard(camera: camera, thumbnails: store.thumbnails)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("camera.card.\(camera.id)")
@@ -108,18 +92,16 @@ private struct EmptyCamerasView: View {
 
     var body: some View {
         VStack(spacing: 26) {
-            Image("BrandMark")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 184, height: 184)
-                .clipShape(.rect(cornerRadius: 46))
+            Image(systemName: "video")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
                 .padding(.top, 22)
             VStack(spacing: 10) {
-                Text("A window to your world")
+                Text("No cameras yet")
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
-                Text("Connect your first camera and bring home a little closer.")
+                Text("Add a camera on your local network to begin.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -134,9 +116,6 @@ private struct EmptyCamerasView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.large)
             .accessibilityIdentifier("camera.add.first")
-            Label("Direct connection. Yours alone.", systemImage: "lock.shield")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
         .padding(26)
         .frame(maxWidth: .infinity)
@@ -146,15 +125,29 @@ private struct EmptyCamerasView: View {
 
 private struct CameraCard: View {
     let camera: CameraConfiguration
+    let thumbnails: CameraThumbnailStore
+    @State private var thumbnail: UIImage?
+    @State private var previewRevision: UInt64 = 0
+
+    private struct PreviewRequest: Hashable {
+        let source: String
+        let revision: UInt64
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack {
-                LinearGradient(colors: [Color(red: 0.035, green: 0.13, blue: 0.18), Color(red: 0.04, green: 0.07, blue: 0.11)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 100, weight: .ultraLight))
-                    .foregroundStyle(.white.opacity(0.12))
-                    .accessibilityHidden(true)
+                if let thumbnail {
+                    Color.black
+                    Image(uiImage: thumbnail).resizable().scaledToFit()
+                        .accessibilityHidden(true)
+                } else {
+                    LinearGradient(colors: [Color(red: 0.035, green: 0.13, blue: 0.18), Color(red: 0.04, green: 0.07, blue: 0.11)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 100, weight: .ultraLight))
+                        .foregroundStyle(.white.opacity(0.12))
+                        .accessibilityHidden(true)
+                }
                 Image(systemName: "play.fill")
                     .font(.title2)
                     .foregroundStyle(.white)
@@ -163,13 +156,17 @@ private struct CameraCard: View {
                     .environment(\.colorScheme, .dark)
                     .accessibilityHidden(true)
             }
-            .aspectRatio(16 / 9, contentMode: .fit)
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .clipped()
             .overlay(alignment: .topLeading) {
-                Text("READY TO CONNECT")
+                Text(thumbnail == nil ? String(localized: "READY TO CONNECT") : String(localized: "Last viewed"))
                     .font(.caption2.weight(.semibold))
                     .tracking(1.2)
                     .foregroundStyle(.white.opacity(0.8))
-                    .padding(18)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.55), in: .capsule)
+                    .padding(14)
             }
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -186,5 +183,17 @@ private struct CameraCard: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(camera.name))
         .accessibilityHint(Text("Open live view"))
+        .accessibilityValue(Text(thumbnail == nil ? String(localized: "READY TO CONNECT") : String(localized: "Last viewed")))
+        .task(id: PreviewRequest(source: CameraThumbnailStore.key(for: camera), revision: previewRevision)) {
+            thumbnail = nil
+            let data = await thumbnails.imageData(for: camera)
+            guard !Task.isCancelled else { return }
+            thumbnail = data.flatMap { UIImage(data: $0) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CameraThumbnailStore.didChange)
+            .receive(on: DispatchQueue.main)) { notification in
+                guard notification.object == nil || notification.object as? UUID == camera.id else { return }
+                previewRevision &+= 1
+            }
     }
 }

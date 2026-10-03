@@ -14,9 +14,9 @@ struct MediaLibraryView: View {
             Group {
                 if library.items.isEmpty {
                     ContentUnavailableView {
-                        Label("Your local library", systemImage: "photo.on.rectangle.angled")
+                        Label("No captures yet", systemImage: "photo.on.rectangle.angled")
                     } description: {
-                        Text("Snapshots and recordings stay on this device. Capture a moment from live view to begin.")
+                        Text("Save snapshots or recordings from live view.")
                     }
                 } else {
                     List(library.items) { item in
@@ -51,6 +51,7 @@ struct MediaLibraryView: View {
                 }
             }
             .navigationTitle("Library")
+            .navigationBarTitleDisplayMode(.large)
             .safeAreaInset(edge: .bottom) {
                 if let message = library.errorMessage {
                     Text(message).font(.footnote).foregroundStyle(.secondary).padding()

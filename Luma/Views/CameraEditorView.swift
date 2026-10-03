@@ -39,20 +39,6 @@ struct CameraEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Image(systemName: "video.badge.plus")
-                            .font(.largeTitle.weight(.light))
-                            .foregroundStyle(LumaTheme.accent)
-                            .accessibilityHidden(true)
-                        Text(camera == nil ? String(localized: "Make room for a new view.") : String(localized: "Fine-tune your connection."))
-                            .font(.title2.weight(.semibold))
-                        Text("Use the camera or recorder address on your home network.")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 12)
-                    .listRowBackground(Color.clear)
-                }
-                Section("CAMERA") {
                     TextField("Name", text: $name, prompt: Text("Front door"))
                         .accessibilityIdentifier("camera.name")
                     TextField("IP address or hostname", text: $host, prompt: Text("192.0.2.64"))
@@ -61,6 +47,10 @@ struct CameraEditorView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .accessibilityIdentifier("camera.host")
+                } header: {
+                    Text("CAMERA")
+                } footer: {
+                    Text("Use the camera or recorder address on your home network.")
                 }
                 Section {
                     TextField("Username", text: $username)

@@ -45,6 +45,16 @@ final class VLCPlaybackSession {
     private var recordingWorkspace: CaptureDestination?
     private var abandonedCaptures: [CaptureDestination] = []
     private var captureTimeout: Task<Void, Never>?
+    private struct PreviewCapture {
+        let fileURL: URL
+        let completion: @MainActor @Sendable (Bool) -> Void
+    }
+    private enum DeferredCapture { case snapshot, recording }
+    private var previewCapture: PreviewCapture?
+    private var previewSubmitted = false
+    private var previewTimeout: Task<Void, Never>?
+    private var deferredCapture: DeferredCapture?
+    private var previewCleanup: [@MainActor @Sendable () -> Void] = []
     private var recordingLimit: Task<Void, Never>?
     private var retirementCompletions: [@MainActor @Sendable () -> Void] = []
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -68,8 +78,63 @@ final class VLCPlaybackSession {
         driver?.setMuted(muted)
     }
 
+    /// A private home-card preview shares the native snapshot lane, but never
+    /// creates a MediaLibrary item or reports a user capture notification.
+    func capturePreview(at url: URL, cleanup: (@MainActor @Sendable () -> Void)? = nil,
+                        completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        guard !isRetiring, hasVideo, previewCapture == nil, url.isFileURL else {
+            completion(false)
+            return
+        }
+        if let cleanup { previewCleanup.append(cleanup) }
+        previewCapture = PreviewCapture(fileURL: url.standardizedFileURL, completion: completion)
+        beginPreviewIfReady()
+    }
+
+    private func beginPreviewIfReady() {
+        guard !isRetiring, hasVideo, capture == nil, deferredCapture == nil,
+              !previewSubmitted, let previewCapture else { return }
+        previewSubmitted = true
+        previewTimeout = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(8)) } catch { return }
+            self?.finishPreview(success: false)
+        }
+        driver?.captureSnapshot(at: previewCapture.fileURL.path) { [weak self] submitted in
+            guard let self, self.previewCapture?.fileURL == previewCapture.fileURL else { return }
+            if !submitted { self.finishPreview(success: false) }
+        }
+    }
+
+    private func finishPreview(success: Bool) {
+        guard let previewCapture else { return }
+        self.previewCapture = nil
+        previewSubmitted = false
+        previewTimeout?.cancel()
+        previewTimeout = nil
+        previewCapture.completion(success)
+        let deferred = deferredCapture
+        deferredCapture = nil
+        guard !isRetiring else {
+            if deferred != nil { setCaptureState(.idle) }
+            return
+        }
+        // Keep libvlc's snapshot filename from being overwritten by a manual
+        // snapshot. Explicit user actions take the next available capture slot.
+        switch deferred {
+        case .snapshot: captureSnapshot()
+        case .recording: toggleRecording()
+        case nil: break
+        }
+    }
+
     func captureSnapshot() {
         guard !isRetiring, capture == nil, hasVideo else { return }
+        if previewSubmitted {
+            guard deferredCapture == nil else { return }
+            deferredCapture = .snapshot
+            setCaptureState(.savingSnapshot)
+            return
+        }
         do {
             let destination = try MediaLibrary.shared.prepare(.snapshot)
             capture = destination
@@ -80,7 +145,9 @@ final class VLCPlaybackSession {
                 if !submitted { self.failCapture() }
             }
         } catch {
+            setCaptureState(.idle)
             onCaptureEvent?(.failed(MediaLibraryError.saveFailed.localizedDescription))
+            beginPreviewIfReady()
         }
     }
 
@@ -91,6 +158,12 @@ final class VLCPlaybackSession {
             return
         }
         guard capture == nil, hasVideo else { return }
+        if previewSubmitted {
+            guard deferredCapture == nil else { return }
+            deferredCapture = .recording
+            setCaptureState(.startingRecording)
+            return
+        }
         do {
             // libvlc's input inherits input-record-path once and caches it.
             // Every recording in this session must use that same directory.
@@ -107,7 +180,9 @@ final class VLCPlaybackSession {
                 if !submitted { self.failCapture() }
             }
         } catch {
+            setCaptureState(.idle)
             onCaptureEvent?(.failed(MediaLibraryError.saveFailed.localizedDescription))
+            beginPreviewIfReady()
         }
     }
 
@@ -126,6 +201,11 @@ final class VLCPlaybackSession {
             hasVideo = true
             if !isRetiring { onEvent?(event) }
         case .snapshotSaved(let path):
+            if let previewCapture, previewSubmitted,
+               URL(fileURLWithPath: path).standardizedFileURL == previewCapture.fileURL {
+                finishPreview(success: true)
+                return
+            }
             guard let capture, capture.kind == .snapshot,
                   URL(fileURLWithPath: path).standardizedFileURL == capture.snapshotURL.standardizedFileURL else { return }
             finishCapture(path: path)
@@ -168,6 +248,7 @@ final class VLCPlaybackSession {
             clearCapture()
             onCaptureEvent?(.saved(capture.kind))
             if isRetiring { disposePlayer() }
+            else { beginPreviewIfReady() }
         } catch {
             failCapture()
         }
@@ -194,6 +275,8 @@ final class VLCPlaybackSession {
             // Force a clean decoder stop if recording could not be finalized.
             // A failed capture is never silently left recording in the background.
             onEvent?(.failed)
+        } else {
+            beginPreviewIfReady()
         }
     }
 
@@ -232,6 +315,7 @@ final class VLCPlaybackSession {
         guard !isRetiring else { return }
         isRetiring = true
         retirementRetainer = self
+        finishPreview(success: false)
         onEvent = nil
         driver?.setMuted(true)
         if capture != nil {
@@ -259,6 +343,11 @@ final class VLCPlaybackSession {
 
     private func finishRetirement() {
         retirementFinished = true
+        // A timed-out SDK snapshot can finish writing late. Its owner deletes
+        // the per-request staging directory on failure and once more after the
+        // native input is fully stopped, so it cannot leave orphaned previews.
+        for cleanup in previewCleanup { cleanup() }
+        previewCleanup = []
         // The input can no longer write to its cached recording path. A
         // successful capture deletes only its own archive staging directory.
         for destination in abandonedCaptures { MediaLibrary.shared.discard(destination) }

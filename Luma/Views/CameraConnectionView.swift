@@ -47,7 +47,8 @@ struct CameraConnectionView: View {
         do {
             let password = try store.password(for: configuration)
             connectionPassword = password
-            player = CameraPlayer(configuration: configuration, password: password)
+            player = CameraPlayer(configuration: configuration, password: password,
+                                  savesPreview: true, thumbnailStore: store.thumbnails)
             failure = nil
         } catch { failure = error.localizedDescription }
     }

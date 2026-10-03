@@ -26,6 +26,14 @@ final class CameraPlayer {
 
     @ObservationIgnored private let configuration: CameraConfiguration
     @ObservationIgnored private let password: String
+    @ObservationIgnored private let savesPreview: Bool
+    @ObservationIgnored private let thumbnailStore: CameraThumbnailStore?
+    @ObservationIgnored private var previewCaptured = false
+    @ObservationIgnored private var previewRequestID: UUID?
+    @ObservationIgnored private var previewTask: Task<Void, Never>?
+    @MainActor private final class PreviewLifetime {
+        var preservesSnapshot = false
+    }
     @ObservationIgnored private weak var surface: UIView?
     @ObservationIgnored private var session: VLCPlaybackSession?
     @ObservationIgnored private var wantsPlayback = false
@@ -42,9 +50,12 @@ final class CameraPlayer {
     @ObservationIgnored private var hasStartedPlayback = false
     @ObservationIgnored private var stopWaiters: [CheckedContinuation<Void, Never>] = []
 
-    init(configuration: CameraConfiguration, password: String) {
+    init(configuration: CameraConfiguration, password: String, savesPreview: Bool = false,
+         thumbnailStore: CameraThumbnailStore? = nil) {
         self.configuration = configuration
         self.password = password
+        self.savesPreview = savesPreview
+        self.thumbnailStore = thumbnailStore
         self.quality = configuration.defaultQuality
     }
 
@@ -52,6 +63,7 @@ final class CameraPlayer {
         retryTask?.cancel()
         watchdogTask?.cancel()
         retirementWatchdog?.cancel()
+        previewTask?.cancel()
         // The session is MainActor isolated (and therefore Sendable). Its SDK
         // references are only touched after hopping back to their owning actor.
         let orphanedSession = session
@@ -243,6 +255,7 @@ final class CameraPlayer {
             let milliseconds = elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000
             Self.performanceLog.notice("first_frame elapsed_ms=\(milliseconds, privacy: .public)")
             receive(.videoPlaying, from: id)
+            savePreviewIfNeeded(from: session)
         case .routeConflict:
             wantsPlayback = false
             cancelScheduledWork()
@@ -254,6 +267,50 @@ final class CameraPlayer {
             recoverOrFail(String(localized: "Unable to play this camera. Check its address, account, and Wi-Fi connection."))
         case .snapshotSaved, .recordingStarted, .recordingStopped:
             break // Capture events are handled by the session before forwarding.
+        }
+    }
+
+    private func savePreviewIfNeeded(from source: VLCPlaybackSession) {
+        guard savesPreview, !previewCaptured, previewRequestID == nil, let thumbnailStore else { return }
+        // One successful snapshot per visit. A replacement session may retry an
+        // interrupted attempt, without a timer or any delay to starting video.
+        let requestID = UUID()
+        previewRequestID = requestID
+        let camera = configuration
+        let sessionID = source.id
+        previewTask = Task { @MainActor [weak self, weak source] in
+            defer {
+                // A canceled old task must not clear a newer session's request.
+                if self?.previewRequestID == requestID {
+                    self?.previewRequestID = nil
+                    self?.previewTask = nil
+                }
+            }
+            guard let ticket = await thumbnailStore.prepareCapture(for: camera) else { return }
+            guard !Task.isCancelled, let source, self?.wantsPlayback == true,
+                  self?.session?.id == sessionID, self?.previewRequestID == requestID else {
+                await thumbnailStore.discard(ticket)
+                return
+            }
+            let lifetime = PreviewLifetime()
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                source.capturePreview(at: ticket.fileURL, cleanup: {
+                    // Once the SDK has produced the image, its independent save
+                    // owns staging cleanup. Retirement must not revoke that save.
+                    if !lifetime.preservesSnapshot { Task { await thumbnailStore.discard(ticket) } }
+                }) { [weak self] success in
+                    if success {
+                        lifetime.preservesSnapshot = true
+                        if self?.previewRequestID == requestID { self?.previewCaptured = true }
+                        // A captured frame remains valid when the user returns
+                        // home or changes quality while ImageIO is compressing.
+                        Task { await thumbnailStore.save(ticket) }
+                    } else {
+                        Task { await thumbnailStore.discard(ticket) }
+                    }
+                    continuation.resume()
+                }
+            }
         }
     }
 
@@ -320,6 +377,9 @@ final class CameraPlayer {
     }
 
     private func retireCurrentSession() {
+        previewTask?.cancel()
+        previewTask = nil
+        previewRequestID = nil
         guard let retiringSession = session else { return }
         session = nil
         isRetiring = true

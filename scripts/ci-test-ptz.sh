@@ -15,14 +15,18 @@ TEST_SUITES=(
 TEST_SCOPE='PTZ discovery/control + real HTTP Digest/connection reuse + UIKit touch events'
 if [ "${1:-}" != '--ptz-only' ]; then
   TEST_SUITES+=(
+    LumaTests/LumaCoreTests
+    LumaTests/ConfigurationBackupTests
     LumaTests/DashboardStoreTests
     LumaTests/DashboardSessionTests
     LumaTests/DashboardPreviewTests
+    LumaTests/CameraThumbnailStoreTests
+    LumaTests/VLCCaptureIntegrationTests
   )
-  TEST_SCOPE="$TEST_SCOPE + dashboard store/session/preview"
+  TEST_SCOPE="$TEST_SCOPE + camera persistence/backup + dashboard store/session/preview + local thumbnail store/real VLC capture"
   if [ "${1:-}" != '--unit-only' ]; then
-    TEST_SUITES+=(LumaUITests/DashboardUITests)
-    TEST_SCOPE="$TEST_SCOPE + dashboard editor UI"
+    TEST_SUITES+=(LumaUITests/DashboardUITests LumaUITests/WelcomeUITests)
+    TEST_SCOPE="$TEST_SCOPE + dashboard editor/first-launch welcome UI"
   fi
 fi
 TEST_ARGUMENTS=()

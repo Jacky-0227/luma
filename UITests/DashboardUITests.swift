@@ -30,9 +30,9 @@ final class DashboardUITests: XCTestCase {
         let customPageSize = app.steppers["dashboard.customPageSize"]
         XCTAssertTrue(customPageSize.waitForExistence(timeout: 5))
         XCTAssertEqual(customPageSize.value as? String, "16")
-        customPageSize.buttons["Increment"].tap()
+        customPageSize.buttons["dashboard.customPageSize-Increment"].tap()
         XCTAssertEqual(customPageSize.value as? String, "17")
-        columns.buttons["Decrement"].tap()
+        columns.buttons["dashboard.columns-Decrement"].tap()
         XCTAssertEqual(columns.value as? String, "3")
 
         let entry = selection("Entry", app: app)

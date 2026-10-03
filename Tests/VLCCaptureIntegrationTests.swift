@@ -9,7 +9,7 @@ import XCTest
 /// camera, external download, network service, or user media.
 final class VLCCaptureIntegrationTests: XCTestCase {
     @MainActor
-    func testRealVLCProducesSnapshotAndTwoPlayableRecordingsInOneSession() async throws {
+    func testRealVLCPreviewDoesNotInterfereWithSnapshotAndTwoPlayableRecordings() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -62,9 +62,32 @@ final class VLCCaptureIntegrationTests: XCTestCase {
             session.start(on: video, muted: true, aspectFill: false)
             try await waitFor("VLC did not confirm a decoded or displayed video frame", probe: probe) { probe.firstFrameReceived }
             XCTAssertTrue(probe.videoStarted, "First-frame evidence must also publish the normal video-playing event for local library consumers.")
-            probe.phase = "snapshot"
+            probe.phase = "preview and queued manual snapshot"
+            let previewCamera = CameraConfiguration(name: "Synthetic preview", host: "192.0.2.90")
+            let thumbnails = CameraThumbnailStore(directory: directory.appendingPathComponent("thumbnails"),
+                                                  cameras: [previewCamera])
+            let preparedCapture = await thumbnails.prepareCapture(for: previewCamera)
+            let previewCapture = try XCTUnwrap(preparedCapture, "The isolated thumbnail store must provide a capture destination.")
+            session.capturePreview(at: previewCapture.fileURL) { success in
+                probe.previewCompletions += 1
+                probe.previewSucceeded = success
+                if !success { probe.failure = "VLC could not capture the separate camera-card preview." }
+            }
+            // This is intentionally immediate: the automatic snapshot owns the
+            // SDK's single snapshot destination while a user requests a capture.
             session.captureSnapshot()
-            try await waitFor("VLC snapshot completion did not produce a library item", probe: probe) { probe.snapshotSaved }
+            try await waitFor("Preview and the queued user snapshot did not both complete", probe: probe) {
+                probe.previewSucceeded == true && probe.snapshotSaved
+            }
+            let preview = try XCTUnwrap(UIImage(contentsOfFile: previewCapture.fileURL.path), "Preview must contain a real decodable image.")
+            XCTAssertEqual(preview.size.width / preview.size.height, 16.0 / 9.0, accuracy: 0.02)
+            XCTAssertEqual(probe.previewCompletions, 1)
+            await thumbnails.save(previewCapture)
+            let cachedData = await thumbnails.imageData(for: previewCamera)
+            let cachedPreview = try XCTUnwrap(cachedData.flatMap { UIImage(data: $0) },
+                                             "The real VLC frame must survive the local thumbnail store's decode and persistence path.")
+            XCTAssertEqual(cachedPreview.size.width / cachedPreview.size.height, 16.0 / 9.0, accuracy: 0.02)
+            XCTAssertLessThanOrEqual(max(cachedPreview.size.width, cachedPreview.size.height), 640)
             for recordingNumber in 1...2 {
                 probe.phase = "recording \(recordingNumber) start"
                 probe.recordingStarted = false
@@ -82,8 +105,10 @@ final class VLCCaptureIntegrationTests: XCTestCase {
             }
 
             let captures = library.items.filter { !previousIDs.contains($0.id) }
-            XCTAssertEqual(captures.filter { $0.kind == .snapshot }.count, 1)
+            XCTAssertEqual(captures.filter { $0.kind == .snapshot }.count, 1,
+                           "The camera-card preview must not appear as a user snapshot in the media library.")
             XCTAssertEqual(captures.filter { $0.kind == .recording }.count, 2)
+            XCTAssertEqual(probe.previewCompletions, 1, "Manual SDK snapshot callbacks must never be mistaken for another preview.")
             for item in captures {
                 let url = try XCTUnwrap(library.fileURL(for: item))
                 let bytes = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
@@ -133,7 +158,7 @@ final class VLCCaptureIntegrationTests: XCTestCase {
     @MainActor
     private func recordFailure(_ error: Error, probe: CaptureProbe, name: String) {
         let message = "VLC integration failure during \(probe.phase): \(error.localizedDescription)"
-        let attachment = XCTAttachment(string: message + "\nfirstFrame=\(probe.firstFrameReceived), videoPlaying=\(probe.videoStarted), snapshotSaved=\(probe.snapshotSaved), recordingStarted=\(probe.recordingStarted), recordingSaved=\(probe.recordingSaved), callbackFailure=\(probe.failure ?? "none")\nevents=\(probe.events.joined(separator: ", "))")
+        let attachment = XCTAttachment(string: message + "\nfirstFrame=\(probe.firstFrameReceived), videoPlaying=\(probe.videoStarted), previewSucceeded=\(String(describing: probe.previewSucceeded)), previewCompletions=\(probe.previewCompletions), snapshotSaved=\(probe.snapshotSaved), recordingStarted=\(probe.recordingStarted), recordingSaved=\(probe.recordingSaved), callbackFailure=\(probe.failure ?? "none")\nevents=\(probe.events.joined(separator: ", "))")
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -228,6 +253,8 @@ private final class CaptureProbe {
     var firstFrameReceived = false
     var videoStarted = false
     var snapshotSaved = false
+    var previewSucceeded: Bool?
+    var previewCompletions = 0
     var recordingStarted = false
     var recordingSaved = false
     var failure: String?

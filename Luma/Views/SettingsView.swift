@@ -8,27 +8,14 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    VStack(spacing: 16) {
-                        Image("BrandMark").resizable().scaledToFit()
-                            .frame(width: 84, height: 84)
-                            .clipShape(.rect(cornerRadius: 22))
-                            .accessibilityHidden(true)
-                        Text("Luma").font(.largeTitle.weight(.semibold)).fontDesign(.rounded)
-                        Text("Home. Within sight.").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .listRowBackground(Color.clear)
-                }
-                Section("EXPERIENCE") {
+                Section("Preferences") {
                     LabeledContent("Language", value: String(localized: "Follows iPhone settings"))
                     Button("Open language & privacy settings", systemImage: "arrow.up.forward.app") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                     }
                     Text("繁體中文 · 简体中文 · English").font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("PRIVATE BY DESIGN") {
+                Section("Privacy") {
                     Label("Camera video connects directly to your device.", systemImage: "network")
                     Label("Passwords are stored in the iPhone Keychain.", systemImage: "key")
                     Label("No accounts, advertising or analytics in Luma.", systemImage: "hand.raised")

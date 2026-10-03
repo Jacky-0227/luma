@@ -317,6 +317,7 @@ private final class PTZHTTPFixture {
         Insecure.MD5.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    @MainActor
     private final class Peer {
         let id = UUID()
         let connection: NWConnection

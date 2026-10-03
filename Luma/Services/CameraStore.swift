@@ -7,10 +7,12 @@ import Observation
 final class CameraStore {
     private(set) var cameras: [CameraConfiguration] = []
     var errorMessage: String?
+    @ObservationIgnored let thumbnails: CameraThumbnailStore
 
     @ObservationIgnored private let storageURL: URL
     @ObservationIgnored private let credentials: any CameraCredentialStorage
     @ObservationIgnored private var writesBlocked = false
+    @ObservationIgnored private var thumbnailRevision: UInt64 = 0
 
     convenience init() {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -22,7 +24,17 @@ final class CameraStore {
     init(storageURL: URL, credentials: any CameraCredentialStorage) {
         self.storageURL = storageURL
         self.credentials = credentials
-        load()
+        let initial: [CameraConfiguration]
+        do { initial = try Self.readCameras(from: storageURL) }
+        catch {
+            initial = []
+            writesBlocked = true
+            errorMessage = CameraStoreError.cannotLoad.localizedDescription
+        }
+        cameras = initial
+        thumbnails = CameraThumbnailStore(
+            directory: storageURL.deletingLastPathComponent().appendingPathComponent("Thumbnails", isDirectory: true),
+            cameras: initial)
     }
 
     func save(_ camera: CameraConfiguration, password: String) throws {
@@ -44,6 +56,7 @@ final class CameraStore {
             throw CameraStoreError.cannotSave
         }
         cameras = updated
+        synchronizeThumbnails()
         errorMessage = nil
     }
 
@@ -61,6 +74,7 @@ final class CameraStore {
             throw CameraStoreError.cannotSave
         }
         cameras = updated
+        synchronizeThumbnails()
         errorMessage = nil
     }
 
@@ -118,22 +132,27 @@ final class CameraStore {
             throw CameraStoreError.cannotSave
         }
         cameras = updated
+        synchronizeThumbnails()
         errorMessage = nil
         return additions.count
     }
 
-    private func load() {
-        guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
-        do {
-            let stored = try JSONDecoder().decode([CameraConfiguration].self, from: Data(contentsOf: storageURL))
-            let validated = try stored.map { try $0.validated() }
-            guard Set(validated.map(\.id)).count == validated.count else { throw CameraStoreError.cannotLoad }
-            cameras = validated
-        } catch {
-            // Keep the original file untouched; an empty UI must never overwrite unreadable data.
-            writesBlocked = true
-            errorMessage = CameraStoreError.cannotLoad.localizedDescription
-        }
+    private static func readCameras(from storageURL: URL) throws -> [CameraConfiguration] {
+        guard FileManager.default.fileExists(atPath: storageURL.path) else { return [] }
+        let stored = try JSONDecoder().decode([CameraConfiguration].self, from: Data(contentsOf: storageURL))
+        let validated = try stored.map { try $0.validated() }
+        guard Set(validated.map(\.id)).count == validated.count else { throw CameraStoreError.cannotLoad }
+        return validated
+    }
+
+    private func synchronizeThumbnails() {
+        // Run only after a successful metadata transaction. A failed edit/delete
+        // must preserve the old preview alongside the restored camera settings.
+        thumbnailRevision &+= 1
+        let revision = thumbnailRevision
+        let existing = cameras
+        let thumbnails = thumbnails
+        Task { await thumbnails.prune(existing: existing, revision: revision) }
     }
 
     private func requireWritable() throws {

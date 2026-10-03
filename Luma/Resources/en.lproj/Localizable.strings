@@ -243,6 +243,15 @@
 "1 camera" = "1 camera";
 "Views per page" = "Views per page";
 "Custom" = "Custom";
+"Last viewed" = "Last viewed";
+"Get started" = "Get started";
+"Add a camera on your local network to begin." = "Add a camera on your local network to begin.";
+"No dashboards yet" = "No dashboards yet";
+"Choose cameras and arrange their layout." = "Choose cameras and arrange their layout.";
+"No captures yet" = "No captures yet";
+"Save snapshots or recordings from live view." = "Save snapshots or recordings from live view.";
+"Preferences" = "Preferences";
+"Privacy" = "Privacy";
 "%lld views per page" = "%lld views per page";
 "%lld columns" = "%lld columns";
 "Video keeps its original proportions. Black bars appear when needed." = "Video keeps its original proportions. Black bars appear when needed.";

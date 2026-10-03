@@ -243,6 +243,15 @@
 "1 camera" = "1 台攝影機";
 "Views per page" = "每頁畫面數量";
 "Custom" = "自訂";
+"Last viewed" = "上次畫面";
+"Get started" = "開始使用";
+"Add a camera on your local network to begin." = "新增同一區域網路內的攝影機。";
+"No dashboards yet" = "尚未新增儀表板";
+"Choose cameras and arrange their layout." = "選擇攝影機並設定畫面配置。";
+"No captures yet" = "尚無快照或錄影";
+"Save snapshots or recordings from live view." = "從即時畫面儲存快照或錄影。";
+"Preferences" = "偏好設定";
+"Privacy" = "隱私";
 "%lld views per page" = "每頁 %lld 個畫面";
 "%lld columns" = "%lld 欄";
 "Video keeps its original proportions. Black bars appear when needed." = "畫面保持原始比例，空間不符時留黑邊。";

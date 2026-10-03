@@ -243,6 +243,15 @@
 "1 camera" = "1 台摄像头";
 "Views per page" = "每页画面数量";
 "Custom" = "自定义";
+"Last viewed" = "上次画面";
+"Get started" = "开始使用";
+"Add a camera on your local network to begin." = "添加同一局域网内的摄像头。";
+"No dashboards yet" = "尚未添加仪表板";
+"Choose cameras and arrange their layout." = "选择摄像头并设置画面布局。";
+"No captures yet" = "暂无截图或录像";
+"Save snapshots or recordings from live view." = "在实时画面中保存截图或录像。";
+"Preferences" = "偏好设置";
+"Privacy" = "隐私";
 "%lld views per page" = "每页 %lld 个画面";
 "%lld columns" = "%lld 列";
 "Video keeps its original proportions. Black bars appear when needed." = "画面保持原始比例，空间不匹配时留黑边。";

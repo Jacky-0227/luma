@@ -53,6 +53,8 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 | Live view | Main/sub streams, sound, full screen, fill/fit and bounded reconnect attempts |
 | Dashboard | Named groups, camera ordering, 4/8/16 or custom 1–64 views per page, 1–8 columns and snapshot covers; all video keeps its original proportions |
 | PTZ | Automatically detects supported pan, tilt and zoom controls; separate web control port |
+| Home previews | A local snapshot from the last successful opening identifies each camera; no live stream is opened by the home card |
+| Clear navigation | Daily screens use section names; brand messages appear on the first-launch welcome screen |
 | Local captures | Snapshots and manual recordings, up to five minutes per recording |
 | Media library | Preview snapshots, replay local recordings, export and confirm deletion |
 | Configuration backup | Import/export JSON without passwords, snapshots or recordings |
@@ -70,6 +72,7 @@ Version 0.1.3 adds older Hikvision API/response formats and sends Stop without w
 
 - No Luma account, cloud sync, remote-access relay, cloud recording or online push service.
 - Camera passwords are stored in the device-only Keychain. Camera settings and media directories are excluded from system backups.
+- Home previews are captured once after live video starts, stored separately from Library, and retained across launches. They preserve the source proportions and are marked “Last viewed.” Open each camera once to create its first preview; failed playback keeps an existing preview. Changing its connection source or removing the camera invalidates the preview. Preview storage is excluded from backups and configuration exports.
 - Exported configuration includes device names, addresses and usernames; it excludes passwords and media. Newly imported cameras require passwords to be entered again. Existing camera IDs are preserved.
 - Video pauses when the app enters the background. An active recording is stopped and finalized.
 - GitHub Actions builds source code. It does not receive camera settings, video, Apple credentials or signing certificates. Runtime viewing does not require a development computer.
