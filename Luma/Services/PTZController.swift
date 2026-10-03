@@ -2,14 +2,16 @@ import Foundation
 import Observation
 import UIKit
 
-/// One FIFO worker owns all requests. Never cancel an in-flight move: a client
-/// timeout or cancellation cannot prove that the camera did not accept it.
+/// At most one movement request and one independent Stop request are in flight.
+/// Stop never waits for movement's HTTP response. An obsolete movement settling
+/// after Stop was issued requires another Stop, even if the first Stop succeeded.
 @MainActor
 @Observable
 final class PTZController {
     var errorMessage: String?
     private(set) var isMoving = false
     private(set) var isStopping = false
+    private(set) var isBlocked = false
     var supportsPanTilt: Bool { capabilities.panMode != nil || capabilities.tiltMode != nil }
     var supportsZoom: Bool { capabilities.zoomMode != nil }
     var usesContinuousControl: Bool {
@@ -17,29 +19,36 @@ final class PTZController {
     }
     var isContinuousMode: Bool { usesContinuousControl }
 
+    private struct Intent {
+        let token: UUID
+        let command: PTZCommand
+        let repeats: Bool
+    }
+
     @ObservationIgnored private let enabled: Bool
     @ObservationIgnored private let transport: any PTZTransport
     @ObservationIgnored private let capabilities: PTZCapabilities
     @ObservationIgnored private let holdLimit: Duration
     @ObservationIgnored private let stopRetryDelay: Duration
-    @ObservationIgnored private var pending: [(command: PTZCommand, generation: Int)] = []
-    @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var repeats = false
-    @ObservationIgnored private var stopInFlight = false
+    @ObservationIgnored private var desired: Intent?
+    @ObservationIgnored private var issuedMoveRevision = 0
+    @ObservationIgnored private var settledMoveRevision = 0
+    @ObservationIgnored private var activeMove: (token: UUID, revision: Int)?
+    @ObservationIgnored private var moveTask: Task<Void, Never>?
+    @ObservationIgnored private var stopTask: Task<Void, Never>?
     @ObservationIgnored private var stopFailed = false
-    @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var pulse: Task<Void, Never>?
     @ObservationIgnored private var deadline: Task<Void, Never>?
     @ObservationIgnored private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     @ObservationIgnored private var backgroundDeadline: Task<Void, Never>?
 
     convenience init(configuration: CameraConfiguration, password: String, capabilities: PTZCapabilities) {
-        // Detected capabilities, rather than a persisted legacy toggle, authorize
-        // this controller. Keep the selected control channel independent of RTSP.
         var controls = configuration
         controls.ptzEnabled = true
         controls.ptzChannel = capabilities.channel
-        self.init(enabled: true, transport: PTZService(configuration: controls, password: password), capabilities: capabilities)
+        self.init(enabled: true,
+                  transport: PTZService(configuration: controls, password: password, apiFamily: capabilities.apiFamily),
+                  capabilities: capabilities)
     }
 
     convenience init(configuration: CameraConfiguration, password: String, supportsPanTilt: Bool = true, supportsZoom: Bool = true) {
@@ -65,8 +74,8 @@ final class PTZController {
         pulse?.cancel()
         deadline?.cancel()
         backgroundDeadline?.cancel()
-        // The deadline retains us until Stop is queued, and the worker until
-        // all stop attempts finish and its background allowance is ended.
+        // Request tasks and the bounded hold deadline retain their owner.
+        // Never cancel a movement request as a substitute for stopping a camera.
     }
 
     func supports(_ direction: PTZDirection) -> Bool { mode(for: direction) != nil }
@@ -82,113 +91,172 @@ final class PTZController {
         }
     }
 
-    func press(_ direction: PTZDirection) { begin(direction, repeats: true) }
+    @discardableResult
+    func press(_ direction: PTZDirection) -> UUID? { begin(direction, repeats: true) }
+
+    func release(token: UUID) {
+        guard desired?.token == token else { return }
+        stop()
+    }
 
     /// VoiceOver activation requests a short movement without a release gesture.
-    func nudge(_ direction: PTZDirection) { begin(direction, repeats: false) }
+    func nudge(_ direction: PTZDirection) { _ = begin(direction, repeats: false) }
 
-    private func begin(_ direction: PTZDirection, repeats: Bool) {
-        guard enabled else { errorMessage = PTZError.disabled.localizedDescription; return }
-        guard !isStopping else {
-            errorMessage = PTZError.stopUnconfirmed.localizedDescription
-            return
-        }
-        guard let mode = mode(for: direction) else { errorMessage = PTZError.unsupported.localizedDescription; return }
-        generation += 1
-        let current = generation
-        self.repeats = repeats && mode == .momentary
+    private func begin(_ direction: PTZDirection, repeats: Bool) -> UUID? {
+        guard enabled else { errorMessage = PTZError.disabled.localizedDescription; return nil }
+        guard !isBlocked else { errorMessage = PTZError.stopUnconfirmed.localizedDescription; return nil }
+        guard let mode = mode(for: direction) else { errorMessage = PTZError.unsupported.localizedDescription; return nil }
+        let intent = Intent(token: UUID(), command: PTZCommand(direction: direction, mode: mode),
+                            repeats: repeats && mode == .momentary)
+        desired = intent
         pulse?.cancel()
+        pulse = nil
         deadline?.cancel()
-        pending.removeAll { !$0.command.isStop }
         isMoving = true
         errorMessage = nil
         beginBackgroundAllowance()
-        pending.append((PTZCommand(direction: direction, mode: mode), current))
-        startWorker()
+
+        if activeMove != nil {
+            // Keep only the newest still-held intent. Stop the previous command
+            // immediately; don't send competing directional requests out of order.
+            isStopping = true
+            ensureStopTask()
+        } else if isStopping {
+            ensureStopTask()
+        } else {
+            sendDesiredMove()
+        }
+
         let limit: Duration = repeats ? holdLimit : .milliseconds(PTZCommand.durationMilliseconds)
-        // Keep this bounded owner alive even if the presentation vanishes just
-        // after the move reply and before SwiftUI delivers onDisappear.
         deadline = Task { @MainActor [self] in
             do { try await Task.sleep(for: limit) } catch { return }
-            guard generation == current else { return }
-            stop()
+            release(token: intent.token)
         }
+        return intent.token
     }
 
+    /// Explicit Stop and lifecycle teardown clear every queued/held intent.
     func stop() {
         guard enabled else { return }
-        generation += 1
-        isMoving = false
+        clearIntent()
         isStopping = true
+        beginBackgroundAllowance()
+        ensureStopTask()
+    }
+
+    private func clearIntent() {
+        desired = nil
+        isMoving = false
         pulse?.cancel()
         pulse = nil
         deadline?.cancel()
         deadline = nil
-        pending.removeAll { !$0.command.isStop }
-        // Repeated release/scene callbacks must not enqueue endless retry batches.
-        guard !stopInFlight, !pending.contains(where: { $0.command.isStop }) else { return }
-        beginBackgroundAllowance()
-        let mode: PTZMovementMode = capabilities.supportsContinuousStop ? .continuous : .momentary
-        pending.append((.stop(mode: mode), generation))
-        startWorker()
     }
 
-    private func startWorker() {
-        guard worker == nil else { return }
-        // Strong ownership intentionally keeps queued Stop alive after view disposal.
-        worker = Task { @MainActor in
-            while !self.pending.isEmpty {
-                let item = self.pending.removeFirst()
-                if item.command.isStop {
-                    await self.sendStop(item.command)
+    private func sendDesiredMove() {
+        guard !isStopping, !isBlocked, activeMove == nil, let intent = desired else { return }
+        issuedMoveRevision += 1
+        let revision = issuedMoveRevision
+        activeMove = (intent.token, revision)
+        let sentAt = ContinuousClock.now
+        moveTask = Task { @MainActor [self] in
+            // Touch-up or a replacement touch can arrive before this task gets
+            // its first turn. An unsent obsolete command must never reach the
+            // camera; already-issued HTTP requests are still allowed to settle.
+            guard desired?.token == intent.token, !isStopping, !isBlocked else {
+                activeMove = nil
+                moveTask = nil
+                if isStopping { ensureStopTask() }
+                finishBackgroundAllowanceIfIdle()
+                return
+            }
+            var failure: PTZError?
+            do { try await transport.send(intent.command) }
+            catch { failure = error as? PTZError ?? .connectionFailed }
+            // There is only one movement lane. A completion may be obsolete, but
+            // it must still update Stop coverage and never revive its old intent.
+            settledMoveRevision = revision
+            activeMove = nil
+            moveTask = nil
+            if let failure, desired?.token == intent.token {
+                errorMessage = failure.localizedDescription
+                clearIntent()
+                isStopping = true
+            }
+            if isStopping || desired?.token != intent.token {
+                isStopping = true
+                ensureStopTask()
+            } else if intent.repeats {
+                schedulePulse(intent, sentAt: sentAt)
+            }
+            finishBackgroundAllowanceIfIdle()
+        }
+    }
+
+    private func ensureStopTask() {
+        guard stopTask == nil else { return }
+        stopTask = Task { @MainActor [self] in
+            let stopMode: PTZMovementMode = capabilities.supportsContinuousStop ? .continuous : .momentary
+            let command = PTZCommand.stop(mode: stopMode)
+            while true {
+                // A Stop only covers movements already settled when it is sent.
+                // Its ACK arriving after a move's ACK does not establish the
+                // camera's command execution order across HTTP connections.
+                let coverage = settledMoveRevision
+                var confirmed = false
+                for attempt in 0...2 {
+                    do {
+                        try await transport.send(command)
+                        confirmed = true
+                        break
+                    } catch {
+                        stopFailed = true
+                        errorMessage = PTZError.stopUnconfirmed.localizedDescription
+                        if attempt < 2 { try? await Task.sleep(for: stopRetryDelay) }
+                    }
+                }
+                if !confirmed {
+                    clearIntent()
+                    isBlocked = true
+                    isStopping = true
+                    stopTask = nil
+                    finishBackgroundAllowanceIfIdle()
+                    return
+                }
+                if activeMove != nil {
+                    // The old movement task keeps us alive. Its eventual success,
+                    // rejection, or timeout will trigger a final compensating Stop.
+                    stopTask = nil
+                    return
+                }
+                if coverage != settledMoveRevision {
+                    // A movement settled while this Stop was in flight. Issue a
+                    // fresh Stop now; don't mistake an early Stop ACK for safety.
                     continue
                 }
-                guard self.isMoving, !self.isStopping, self.generation == item.generation else { continue }
-                do {
-                    try await self.transport.send(item.command)
-                    if self.isMoving, self.repeats, self.generation == item.generation {
-                        self.schedulePulse(item.command, generation: item.generation)
-                    }
-                } catch {
-                    self.errorMessage = (error as? PTZError ?? .connectionFailed).localizedDescription
-                    self.stop()
-                }
-            }
-            self.worker = nil
-            if !self.isMoving { self.endBackgroundAllowance() }
-        }
-    }
-
-    private func sendStop(_ command: PTZCommand) async {
-        stopInFlight = true
-        defer { stopInFlight = false }
-        for attempt in 0...2 {
-            do {
-                try await transport.send(command)
                 isStopping = false
+                isBlocked = false
                 if stopFailed || errorMessage == PTZError.stopUnconfirmed.localizedDescription { errorMessage = nil }
                 stopFailed = false
+                stopTask = nil
+                sendDesiredMove()
+                finishBackgroundAllowanceIfIdle()
                 return
-            } catch {
-                stopFailed = true
-                errorMessage = PTZError.stopUnconfirmed.localizedDescription
-                if attempt < 2 { try? await Task.sleep(for: stopRetryDelay) }
             }
         }
-        // Remain stopped at the command layer and block further motion. The user
-        // can explicitly retry Stop; never report physical stop without an ACK.
-        isStopping = true
-        pending.removeAll { !$0.command.isStop }
     }
 
-    private func schedulePulse(_ command: PTZCommand, generation: Int) {
-        guard command.mode == .momentary else { return }
+    private func schedulePulse(_ intent: Intent, sentAt: ContinuousClock.Instant) {
+        guard intent.command.mode == .momentary else { return }
         pulse?.cancel()
         pulse = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-            guard let self, self.isMoving, !self.isStopping, self.generation == generation else { return }
-            self.pending.append((command, generation))
-            self.startWorker()
+            // Don't add a fixed 300 ms delay on top of HTTP response latency.
+            let delay = ContinuousClock.now.duration(to: sentAt.advanced(by: .milliseconds(300)))
+            if delay > .zero {
+                do { try await Task.sleep(for: delay) } catch { return }
+            }
+            guard let self, self.desired?.token == intent.token, !self.isStopping, !self.isBlocked else { return }
+            self.sendDesiredMove()
         }
     }
 
@@ -206,6 +274,10 @@ final class PTZController {
             self?.stop()
             self?.endBackgroundAllowance()
         }
+    }
+
+    private func finishBackgroundAllowanceIfIdle() {
+        if desired == nil, activeMove == nil, stopTask == nil { endBackgroundAllowance() }
     }
 
     private func endBackgroundAllowance() {

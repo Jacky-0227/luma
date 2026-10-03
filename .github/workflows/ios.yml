@@ -8,6 +8,16 @@ on:
         type: boolean
         required: false
         default: false
+      ptz_only:
+        description: Run only PTZ protocol and native touch regressions before packaging
+        type: boolean
+        required: false
+        default: false
+      unit_only:
+        description: Run PTZ and dashboard unit/integration tests without UI automation
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -44,8 +54,14 @@ jobs:
       - name: Run model and interface tests
         env:
           FOCUSED_TESTS: ${{ inputs.focused_tests }}
+          PTZ_ONLY: ${{ inputs.ptz_only }}
+          UNIT_ONLY: ${{ inputs.unit_only }}
         run: |
-          if [ "$FOCUSED_TESTS" = 'true' ]; then
+          if [ "$UNIT_ONLY" = 'true' ]; then
+            bash scripts/ci-test-ptz.sh --unit-only
+          elif [ "$PTZ_ONLY" = 'true' ]; then
+            bash scripts/ci-test-ptz.sh --ptz-only
+          elif [ "$FOCUSED_TESTS" = 'true' ]; then
             bash scripts/ci-test-ptz.sh
           else
             bash scripts/ci-test.sh

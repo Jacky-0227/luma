@@ -51,7 +51,7 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 | Available in this preview | Details |
 | --- | --- |
 | Live view | Main/sub streams, sound, full screen, fill/fit and bounded reconnect attempts |
-| Dashboard | Named groups, camera selection and ordering, one/two-column layouts, snapshot covers; up to four live cameras per page with aspect-fit video |
+| Dashboard | Named groups, camera ordering, 4/8/16 or custom 1–64 views per page, 1–8 columns and snapshot covers; all video keeps its original proportions |
 | PTZ | Automatically detects supported pan, tilt and zoom controls; separate web control port |
 | Local captures | Snapshots and manual recordings, up to five minutes per recording |
 | Media library | Preview snapshots, replay local recordings, export and confirm deletion |
@@ -62,7 +62,9 @@ PTZ detection reads Hikvision capabilities for each axis and supports timed or c
 
 **Not implemented:** automatic camera discovery, PTZ presets, two-way talk, camera SD-card/NVR recording search and playback, picture in picture, widgets and shortcuts. Playback in the media library refers to recordings made by Luma.
 
-Use **Dashboard → +** to name a group, choose cameras and arrange their order. The first four cameras form its cover. Open a group for live views; all tiles preserve the source aspect ratio and use black bars when needed. Covers use small in-memory device snapshots, so devices without a compatible snapshot endpoint show a placeholder. Dashboard layouts stay on this iPhone and are not included in camera configuration exports.
+Use **Dashboard → +** to name a group, choose cameras and arrange their order. Choose 4, 8, 16 or a custom number of views per page (1–64), and 1–8 columns. The first page forms its cover. All tiles preserve the source aspect ratio with black bars when needed; video is never stretched or squeezed. Covers use small in-memory device snapshots, so devices without a compatible snapshot endpoint show a placeholder. Dashboard layouts stay on this iPhone and are not included in camera configuration exports. Higher live-view counts use more decoding capacity, memory and bandwidth; the configurable limit is not a guarantee of smooth playback on every phone.
+
+Version 0.1.3 adds older Hikvision API/response formats and sends Stop without waiting for an outstanding move response. Its [protocol research map](docs/PTZ-protocol-reference.md) distinguishes implemented ISAPI/IPMD support from ONVIF, PSIA and SDK interfaces that have only been researched.
 
 ## Local by design
 

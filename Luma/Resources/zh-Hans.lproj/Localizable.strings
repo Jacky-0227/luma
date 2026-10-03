@@ -241,3 +241,11 @@
 "Two columns" = "两列";
 "Your dashboards" = "你的仪表板";
 "1 camera" = "1 台摄像头";
+"Views per page" = "每页画面数量";
+"Custom" = "自定义";
+"%lld views per page" = "每页 %lld 个画面";
+"%lld columns" = "%lld 列";
+"Video keeps its original proportions. Black bars appear when needed." = "画面保持原始比例，空间不匹配时留黑边。";
+"More live views use more network bandwidth and device resources." = "同时播放更多画面会增加网络带宽和设备资源占用。";
+"The first page of cameras appears on the dashboard cover." = "第一页的摄像头会显示在仪表板封面上。";
+"Fluent streams, sound off. Every view keeps its original proportions." = "使用流畅画质并静音，所有画面均保持原始比例。";

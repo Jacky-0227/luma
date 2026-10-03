@@ -20,6 +20,21 @@ final class DashboardUITests: XCTestCase {
         name.typeText("Porch group\n")
         waitFor(NSPredicate(format: "exists == false"), on: app.keyboards.firstMatch)
 
+        let pageSize = app.segmentedControls["dashboard.pageSize"]
+        XCTAssertTrue(pageSize.waitForExistence(timeout: 5))
+        pageSize.buttons["16"].tap()
+        XCTAssertTrue(pageSize.buttons["16"].isSelected)
+        let columns = app.steppers["dashboard.columns"]
+        XCTAssertEqual(columns.value as? String, "4")
+        pageSize.buttons["Custom"].tap()
+        let customPageSize = app.steppers["dashboard.customPageSize"]
+        XCTAssertTrue(customPageSize.waitForExistence(timeout: 5))
+        XCTAssertEqual(customPageSize.value as? String, "16")
+        customPageSize.buttons["Increment"].tap()
+        XCTAssertEqual(customPageSize.value as? String, "17")
+        columns.buttons["Decrement"].tap()
+        XCTAssertEqual(columns.value as? String, "3")
+
         let entry = selection("Entry", app: app)
         reveal(entry, app: app)
         entry.tap()
@@ -36,9 +51,6 @@ final class DashboardUITests: XCTestCase {
         moveGardenUp.tap()
         waitFor(NSPredicate(format: "enabled == false"), on: moveGardenUp)
         XCTAssertTrue(app.buttons["dashboard.move-up.\(entryID)"].isEnabled)
-        let oneColumn = app.buttons["One column"]
-        reveal(oneColumn, app: app, towardTop: true)
-        oneColumn.tap()
         app.buttons["dashboard.save"].tap()
 
         let card = app.descendants(matching: .any).matching(NSPredicate(
@@ -51,10 +63,15 @@ final class DashboardUITests: XCTestCase {
         app.buttons["Edit dashboard"].tap()
         XCTAssertTrue(name.waitForExistence(timeout: 5))
         XCTAssertEqual(name.value as? String, "Porch group")
-        XCTAssertTrue(app.buttons["One column"].isSelected)
+        XCTAssertTrue(pageSize.buttons["Custom"].isSelected)
+        XCTAssertEqual(customPageSize.value as? String, "17")
+        XCTAssertEqual(columns.value as? String, "3")
+        capture("en-dashboard-layout")
+        reveal(app.buttons["dashboard.move-up.\(entryID)"], app: app)
         XCTAssertFalse(app.buttons["dashboard.move-up.\(gardenID)"].isEnabled)
         XCTAssertTrue(app.buttons["dashboard.move-up.\(entryID)"].isEnabled)
         capture("en-dashboard-editor")
+        reveal(name, app: app, towardTop: true)
         name.tap()
         name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "Porch group".count) + "Courtyard\n")
         waitFor(NSPredicate(format: "exists == false"), on: app.keyboards.firstMatch)

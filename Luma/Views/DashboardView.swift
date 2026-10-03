@@ -97,7 +97,7 @@ struct DashboardView: View {
             NavigationLink {
                 DashboardViewerView(dashboard: dashboard, store: store)
             } label: {
-                DashboardMosaic(cameras: Array(cameras.prefix(4)), store: store)
+                DashboardMosaic(cameras: Array(cameras.prefix(dashboard.pageSize)), columns: dashboard.columns, store: store)
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
@@ -138,9 +138,10 @@ private struct DashboardEditorRoute: Identifiable {
 
 private struct DashboardMosaic: View {
     let cameras: [CameraConfiguration]
+    let columns: Int
     let store: CameraStore
-    private var columnCount: Int { cameras.count == 1 ? 1 : 2 }
-    private var rowCount: Int { cameras.count > 2 ? 2 : 1 }
+    private var columnCount: Int { min(max(1, cameras.count), min(8, max(1, columns))) }
+    private var rowCount: Int { max(1, (cameras.count + columnCount - 1) / columnCount) }
 
     var body: some View {
         ZStack {

@@ -64,29 +64,10 @@ struct PTZControlsView: View {
         .accessibilityIdentifier("ptz.stop")
     }
 
-    private func direction(_ direction: PTZDirection, symbol: String, label: LocalizedStringKey) -> some View {
-        Button {} label: {
-            Image(systemName: symbol).font(.title3.weight(.semibold))
-        }
-        .buttonStyle(PTZHoldStyle { pressed in
-            if pressed { controller.press(direction) }
-            else { controller.stop() }
-        })
-        .accessibilityLabel(Text(label))
-        .accessibilityHint(Text("Activate to move a short distance."))
-        .accessibilityAction { controller.nudge(direction) }
-        .disabled(!controller.supports(direction) || controller.isStopping)
-    }
-}
-
-private struct PTZHoldStyle: ButtonStyle {
-    let onPress: (Bool) -> Void
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+    private func direction(_ direction: PTZDirection, symbol: String, label: String.LocalizationValue) -> some View {
+        PTZHoldButton(controller: controller, direction: direction, symbol: symbol,
+                      label: String(localized: label),
+                      isEnabled: controller.supports(direction) && !controller.isBlocked)
             .frame(width: 60, height: 60)
-            .glassEffect(.regular.interactive(), in: .circle)
-            .opacity(configuration.isPressed ? 0.65 : 1)
-            .onChange(of: configuration.isPressed) { _, pressed in onPress(pressed) }
     }
 }

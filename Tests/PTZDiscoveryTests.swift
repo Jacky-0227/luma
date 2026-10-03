@@ -6,7 +6,7 @@ final class PTZDiscoveryTests: XCTestCase {
         let configuration = CameraConfiguration(name: "Test", host: "camera.local", ptzEnabled: false,
                                                 controlPort: 8443, controlUseHTTPS: true)
         let endpoint = try PTZEndpoint(configuration: configuration, requireEnabled: false)
-        for resource in [PTZDiscoveryResource.channels, .capabilities(3), .configuration(3)] {
+        for resource in [PTZDiscoveryResource.channels, .capabilities(3), .configuration(3), .legacyChannels, .legacyCapabilities(3), .legacyConfiguration(3)] {
             let request = try resource.request(endpoint: endpoint)
             XCTAssertEqual(request.httpMethod, "GET")
             XCTAssertNil(request.httpBody)
@@ -19,6 +19,117 @@ final class PTZDiscoveryTests: XCTestCase {
         XCTAssertThrowsError(try PTZDiscoveryResource.capabilities(0).request(endpoint: endpoint))
         XCTAssertThrowsError(try PTZDiscoveryResource.configuration(1000).request(endpoint: endpoint))
         XCTAssertEqual(try PTZDiscoveryResource.configuration(3).request(endpoint: endpoint).url?.path, "/ISAPI/PTZCtrl/channels/3")
+        XCTAssertEqual(try PTZDiscoveryResource.legacyChannels.request(endpoint: endpoint).url?.path, "/PTZCtrl/channels")
+        XCTAssertEqual(try PTZDiscoveryResource.legacyCapabilities(3).request(endpoint: endpoint).url?.path, "/PTZCtrl/channels/3/capabilities")
+        XCTAssertEqual(try PTZDiscoveryResource.legacyConfiguration(3).request(endpoint: endpoint).url?.path, "/PTZCtrl/channels/3")
+        XCTAssertThrowsError(try PTZDiscoveryResource.legacyCapabilities(0).request(endpoint: endpoint))
+        XCTAssertThrowsError(try PTZDiscoveryResource.legacyConfiguration(1000).request(endpoint: endpoint))
+    }
+
+    @MainActor
+    func testResponseStatusUnsupportedIsRecognizedInsideHTTP200And400() throws {
+        for status in [200, 400] {
+            for subcode in ["notSupport", "methodNotAllowed"] {
+                let data = Self.responseStatus(code: 4, subcode: subcode)
+                XCTAssertThrowsError(try ISAPIPTZDiscoveryTransport.validatedData(data, statusCode: status)) {
+                    guard case PTZError.unsupported = $0 else { return XCTFail("Expected an unsupported route, got \($0)") }
+                }
+            }
+        }
+        let legacySuccess = Data("<ResponseStaus xmlns=\"http://www.hikvision.com/ver10/XMLSchema\"><statusCode>1</statusCode></ResponseStaus>".utf8)
+        XCTAssertEqual(try PTZResponseDocument.validate(legacySuccess), .success)
+        XCTAssertEqual(try PTZResponseDocument.validate(Self.continuousCapabilities), .notStatus)
+        XCTAssertThrowsError(try ISAPIPTZDiscoveryTransport.validatedData(legacySuccess, statusCode: 200), "A command acknowledgement is not a capability document.")
+    }
+
+    @MainActor
+    func testResponseStatusNeverConfusesPrivilegeOrAmbiguousErrorsWithAbsentPTZ() throws {
+        for subcode in ["lowPrivilege", "badAuthorization"] {
+            XCTAssertThrowsError(try ISAPIPTZDiscoveryTransport.validatedData(Self.responseStatus(code: 4, subcode: subcode), statusCode: 200)) {
+                guard case PTZError.permissionDenied = $0 else { return XCTFail("Expected permission failure, got \($0)") }
+            }
+        }
+        for data in [Self.responseStatus(code: 4), Self.responseStatus(code: 4, subcode: "invalidOperation"),
+                     Self.responseStatus(code: 1, subcode: "notSupport"),
+                     Data("<ResponseStatus><statusCode>4</statusCode><subStatusCode>notSupport</subStatusCode><subStatusCode>lowPrivilege</subStatusCode></ResponseStatus>".utf8),
+                     Data("<ResponseStatus><statusCode><nested>4</nested></statusCode><subStatusCode>notSupport</subStatusCode></ResponseStatus>".utf8)] {
+            XCTAssertThrowsError(try PTZResponseDocument.validate(data)) {
+                guard case PTZError.invalidResponse = $0 else { return XCTFail("Ambiguous status must remain unknown, got \($0)") }
+            }
+        }
+        XCTAssertThrowsError(try ISAPIPTZDiscoveryTransport.validatedData(Self.responseStatus(code: 4, subcode: "notSupport"), statusCode: 403)) {
+            guard case PTZError.permissionDenied = $0 else { return XCTFail("HTTP permission errors must not cause route fallback.") }
+        }
+    }
+
+    func testResponseStatusParserRetainsBodyAndEntityBounds() throws {
+        XCTAssertThrowsError(try PTZResponseDocument.validate(Data(repeating: 32, count: 131_073)))
+        let document = "<?xml version=\"1.0\" encoding=\"UTF-16\"?><!DOCTYPE ResponseStatus [<!ENTITY code \"1\">]><ResponseStatus><statusCode>&code;</statusCode></ResponseStatus>"
+        XCTAssertThrowsError(try PTZResponseDocument.validate(XCTUnwrap(document.data(using: .utf16))))
+        XCTAssertThrowsError(try PTZResponseDocument.validate(Data("<ResponseStatus><statusCode>1</statusCode>".utf8)))
+    }
+
+    @MainActor
+    func testExplicitlyUnsupportedISAPIRoutesUseLegacyMappedChannelAndRetainFamily() async throws {
+        let unsupported = Self.responseStatus(code: 4, subcode: "notSupport")
+        let legacyList = Data("<PTZChannelList xmlns=\"http://www.hikvision.com/ver10/XMLSchema\"><PTZChannel><id>7</id><videoInputID>3</videoInputID><enabled>true</enabled><panSupport>true</panSupport><tiltSupport>true</tiltSupport><zoomSupport>false</zoomSupport></PTZChannel></PTZChannelList>".utf8)
+        let transport = CapabilityHTTPTransport([
+            (.channels, 200, unsupported), (.capabilities(3), 400, unsupported), (.configuration(3), 404, Data()),
+            (.legacyChannels, 200, legacyList), (.legacyCapabilities(7), 404, Data())
+        ])
+        let camera = CameraConfiguration(name: "Test", host: "camera.local", channel: 3)
+        let result = try await PTZCapabilityDetector.detect(configuration: camera, transport: transport)
+        XCTAssertEqual(result, .available(PTZCapabilities(channel: 7, panMode: .continuous, tiltMode: .continuous, zoomMode: nil, apiFamily: .legacy)))
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(3), .configuration(3), .legacyChannels, .legacyCapabilities(7)])
+    }
+
+    @MainActor
+    func testISAPIStatusFailureCanStillUseMatchingConfigurationWithoutLegacyRequests() async throws {
+        let unsupported = Self.responseStatus(code: 4, subcode: "notSupport")
+        let detail = Data("<PTZChannel><id>1</id><videoInputID>1</videoInputID><panSupport>true</panSupport><tiltSupport>false</tiltSupport><zoomSupport>false</zoomSupport></PTZChannel>".utf8)
+        let transport = CapabilityHTTPTransport([
+            (.channels, 200, Data("<PTZChannelList/>".utf8)), (.capabilities(1), 400, unsupported), (.configuration(1), 200, detail)
+        ])
+        let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+        XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: nil, zoomMode: nil)))
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1), .configuration(1)])
+    }
+
+    @MainActor
+    func testPermissionAmbiguousStatusMalformedAndNegativeEvidenceDoNotFallBackToLegacy() async throws {
+        for entry in [(200, Self.responseStatus(code: 4)), (400, Self.responseStatus(code: 4, subcode: "lowPrivilege")),
+                      (200, Data("<html>Sign in</html>".utf8))] {
+            let transport = CapabilityHTTPTransport([(.channels, entry.0, entry.1)])
+            let discovery = PTZDiscovery { _, _ in transport }
+            let result = try await discovery.detect(configuration: Self.camera, password: "synthetic")
+            XCTAssertEqual(result, .unknown)
+            XCTAssertEqual(transport.requests, [.channels])
+        }
+        let disabled = Data("<PTZChannelList><PTZChannel><id>1</id><enabled>false</enabled></PTZChannel></PTZChannelList>".utf8)
+        let transport = CapabilityHTTPTransport([(.channels, 200, disabled)])
+        let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+        XCTAssertEqual(result, .unavailable)
+        XCTAssertEqual(transport.requests, [.channels])
+    }
+
+    @MainActor
+    func testOldCapabilityConfigurationRootUsesExplicitAxesAndVerifiesVideoMapping() async throws {
+        let detail = Data("<PTZChannel xmlns=\"http://www.hikvision.com/ver10/XMLSchema\"><id>1</id><videoInputID>1</videoInputID><enabled>true</enabled><panSupport>true</panSupport><tiltSupport>false</tiltSupport><zoomSupport>true</zoomSupport></PTZChannel>".utf8)
+        let transport = CapabilityTransport(channels: [1], capability: detail)
+        let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
+        XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: nil, zoomMode: .continuous)))
+        XCTAssertEqual(transport.requests, [.channels, .capabilities(1)])
+        let mismatch = Data(String(decoding: detail, as: UTF8.self).replacingOccurrences(of: "<videoInputID>1</videoInputID>", with: "<videoInputID>2</videoInputID>").utf8)
+        XCTAssertEqual(try PTZCapabilityDocument.capabilityResponse(mismatch, channel: 1, videoChannel: 1, configuration: nil, apiFamily: .legacy), .unknown)
+        let noAxes = Data("<PTZChannel><id>1</id><enabled>true</enabled><panMaxSpeed>300</panMaxSpeed><tiltMaxSpeed>200</tiltMaxSpeed></PTZChannel>".utf8)
+        XCTAssertEqual(try PTZCapabilityDocument.capabilityResponse(noAxes, channel: 1, videoChannel: 1, configuration: nil, apiFamily: .legacy), .unknown)
+        let flags = try XCTUnwrap(PTZCapabilityDocument.channels(Self.channelList(pan: false, tilt: false, zoom: false)).first)
+        XCTAssertEqual(try PTZCapabilityDocument.capabilityResponse(detail, channel: 1, videoChannel: 1, configuration: flags, apiFamily: .isapi), .unavailable)
+    }
+
+    private static func responseStatus(code: Int, subcode: String? = nil) -> Data {
+        let extra = subcode.map { "<subStatusCode>\($0)</subStatusCode>" } ?? ""
+        return Data("<ResponseStatus xmlns=\"http://www.hikvision.com/ver20/XMLSchema\"><statusCode>\(code)</statusCode>\(extra)</ResponseStatus>".utf8)
     }
 
     @MainActor
@@ -80,7 +191,7 @@ final class PTZDiscoveryTests: XCTestCase {
                        .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: nil, zoomMode: nil)))
     }
 
-    func testMovementModeIsSelectedPerAxisWithMomentaryPreferred() throws {
+    func testMovementModeIsSelectedPerAxisWithContinuousPreferredWhenAdvertised() throws {
         let data = Data("""
         <PTZChanelCap>
           <MomentaryPanTiltSpace><XRange><Min>-1</Min><Max>1</Max></XRange><YRange><Min>0</Min><Max>0</Max></YRange></MomentaryPanTiltSpace>
@@ -89,7 +200,7 @@ final class PTZDiscoveryTests: XCTestCase {
         </PTZChanelCap>
         """.utf8)
         XCTAssertEqual(try PTZCapabilityDocument.capabilities(data, channel: 1),
-                       .available(PTZCapabilities(channel: 1, panMode: .momentary, tiltMode: .continuous, zoomMode: .continuous)))
+                       .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: .continuous)))
     }
 
     @MainActor
@@ -97,7 +208,7 @@ final class PTZDiscoveryTests: XCTestCase {
         let transport = CapabilityTransport(channels: [], capability: Self.timedCapabilities)
         transport.channelXML = Self.channelList(pan: false, tilt: false, zoom: true)
         let result = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
-        XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: nil, tiltMode: nil, zoomMode: .momentary)))
+        XCTAssertEqual(result, .available(PTZCapabilities(channel: 1, panMode: nil, tiltMode: nil, zoomMode: .continuous)))
         transport.channelXML = Self.channelList(pan: false, tilt: false, zoom: false)
         let fixed = try await PTZCapabilityDetector.detect(configuration: Self.camera, transport: transport)
         XCTAssertEqual(fixed, .unavailable, "Explicit per-axis negatives override generic range templates.")
@@ -191,7 +302,7 @@ final class PTZDiscoveryTests: XCTestCase {
                        .available(Self.momentaryOnlyCapabilities(channel: 1)))
         let flags = try XCTUnwrap(PTZCapabilityDocument.channels(Self.channelList(pan: true, tilt: true, zoom: true)).first)
         XCTAssertEqual(try PTZCapabilityDocument.capabilities(Self.timedCapabilities, channel: 1, configuration: flags),
-                       .available(PTZCapabilities(channel: 1, panTilt: true, zoom: true)))
+                       .available(PTZCapabilities(channel: 1, panMode: .continuous, tiltMode: .continuous, zoomMode: .continuous)))
         let mixed = Data("<PTZChanelCap><MomentaryPanTiltSpace><XRange><Min>-1</Min><Max>1</Max></XRange></MomentaryPanTiltSpace><ContinuousZoomSpace><ZRange><Min>-1</Min><Max>1</Max></ZRange></ContinuousZoomSpace></PTZChanelCap>".utf8)
         XCTAssertEqual(try PTZCapabilityDocument.capabilities(mixed, channel: 1),
                        .available(PTZCapabilities(channel: 1, panMode: .momentary, tiltMode: nil, zoomMode: .continuous)))
@@ -304,6 +415,23 @@ final class PTZDiscoveryTests: XCTestCase {
 }
 
 @MainActor
+private final class CapabilityHTTPTransport: PTZDiscoveryTransport {
+    private var responses: [(PTZDiscoveryResource, Int, Data)]
+    private(set) var requests: [PTZDiscoveryResource] = []
+
+    init(_ responses: [(PTZDiscoveryResource, Int, Data)]) { self.responses = responses }
+
+    func get(_ resource: PTZDiscoveryResource) async throws -> Data {
+        requests.append(resource)
+        guard !responses.isEmpty else { throw PTZError.invalidResponse }
+        let expected = responses.removeFirst()
+        XCTAssertEqual(resource, expected.0)
+        guard resource == expected.0 else { throw PTZError.invalidResponse }
+        return try ISAPIPTZDiscoveryTransport.validatedData(expected.2, statusCode: expected.1)
+    }
+}
+
+@MainActor
 private final class CapabilityTransport: PTZDiscoveryTransport {
     let channels: [Int]
     let capability: Data
@@ -329,6 +457,8 @@ private final class CapabilityTransport: PTZDiscoveryTransport {
             return capability
         case .configuration:
             if let configurationXML { return configurationXML }
+            throw PTZError.unsupported
+        case .legacyChannels, .legacyCapabilities, .legacyConfiguration:
             throw PTZError.unsupported
         }
     }

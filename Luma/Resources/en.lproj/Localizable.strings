@@ -241,3 +241,11 @@
 "Two columns" = "Two columns";
 "Your dashboards" = "Your dashboards";
 "1 camera" = "1 camera";
+"Views per page" = "Views per page";
+"Custom" = "Custom";
+"%lld views per page" = "%lld views per page";
+"%lld columns" = "%lld columns";
+"Video keeps its original proportions. Black bars appear when needed." = "Video keeps its original proportions. Black bars appear when needed.";
+"More live views use more network bandwidth and device resources." = "More live views use more network bandwidth and device resources.";
+"The first page of cameras appears on the dashboard cover." = "The first page of cameras appears on the dashboard cover.";
+"Fluent streams, sound off. Every view keeps its original proportions." = "Fluent streams, sound off. Every view keeps its original proportions.";

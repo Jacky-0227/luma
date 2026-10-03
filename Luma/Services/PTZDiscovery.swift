@@ -6,29 +6,38 @@ enum PTZMovementMode: Equatable, Sendable {
     case continuous
 }
 
+/// The original IPMD protocol predates the /ISAPI prefix. Detection and control
+/// must use the same API family; a successful legacy read cannot prove ISAPI works.
+enum PTZAPIFamily: Equatable, Sendable {
+    case isapi
+    case legacy
+}
+
 struct PTZCapabilities: Equatable, Sendable {
     let channel: Int
     let panMode: PTZMovementMode?
     let tiltMode: PTZMovementMode?
     let zoomMode: PTZMovementMode?
     let supportsContinuousStop: Bool
+    let apiFamily: PTZAPIFamily
 
     var panTilt: Bool { panMode != nil || tiltMode != nil }
     var zoom: Bool { zoomMode != nil }
 
     init(channel: Int, panMode: PTZMovementMode?, tiltMode: PTZMovementMode?,
-         zoomMode: PTZMovementMode?, supportsContinuousStop: Bool = true) {
+         zoomMode: PTZMovementMode?, supportsContinuousStop: Bool = true, apiFamily: PTZAPIFamily = .isapi) {
         self.channel = channel
         self.panMode = panMode
         self.tiltMode = tiltMode
         self.zoomMode = zoomMode
         self.supportsContinuousStop = supportsContinuousStop
+        self.apiFamily = apiFamily
     }
 
     /// Existing deterministic UI fixtures describe timed movement on every axis.
-    init(channel: Int, panTilt: Bool, zoom: Bool) {
+    init(channel: Int, panTilt: Bool, zoom: Bool, apiFamily: PTZAPIFamily = .isapi) {
         self.init(channel: channel, panMode: panTilt ? .momentary : nil,
-                  tiltMode: panTilt ? .momentary : nil, zoomMode: zoom ? .momentary : nil)
+                  tiltMode: panTilt ? .momentary : nil, zoomMode: zoom ? .momentary : nil, apiFamily: apiFamily)
     }
 }
 
@@ -48,6 +57,19 @@ enum PTZDiscoveryResource: Equatable, Sendable {
     case channels
     case capabilities(Int)
     case configuration(Int)
+    case legacyChannels
+    case legacyCapabilities(Int)
+    case legacyConfiguration(Int)
+
+    func inFamily(_ family: PTZAPIFamily) -> Self {
+        guard family == .legacy else { return self }
+        switch self {
+        case .channels: return .legacyChannels
+        case .capabilities(let channel): return .legacyCapabilities(channel)
+        case .configuration(let channel): return .legacyConfiguration(channel)
+        default: return self
+        }
+    }
 
     func request(endpoint: PTZEndpoint) throws -> URLRequest {
         let path: String
@@ -59,6 +81,13 @@ enum PTZDiscoveryResource: Equatable, Sendable {
         case .configuration(let channel):
             guard (1...999).contains(channel) else { throw PTZError.invalidSettings }
             path = "/ISAPI/PTZCtrl/channels/\(channel)"
+        case .legacyChannels: path = "/PTZCtrl/channels"
+        case .legacyCapabilities(let channel):
+            guard (1...999).contains(channel) else { throw PTZError.invalidSettings }
+            path = "/PTZCtrl/channels/\(channel)/capabilities"
+        case .legacyConfiguration(let channel):
+            guard (1...999).contains(channel) else { throw PTZError.invalidSettings }
+            path = "/PTZCtrl/channels/\(channel)"
         }
         let host = endpoint.host.contains(":") ? "[\(endpoint.host)]" : endpoint.host
         guard let url = URL(string: "\(endpoint.scheme)://\(host):\(endpoint.port)\(path)") else {
@@ -104,9 +133,17 @@ final class ISAPIPTZDiscoveryTransport: PTZDiscoveryTransport {
         let (data, response) = try await session.data(for: resource.request(endpoint: endpoint))
         try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse else { throw PTZError.invalidResponse }
-        if response.statusCode == 401 || response.statusCode == 403 { throw PTZError.permissionDenied }
-        if [404, 405, 501].contains(response.statusCode) { throw PTZError.unsupported }
-        guard (200...299).contains(response.statusCode), data.count <= 131_072 else { throw PTZError.invalidResponse }
+        return try Self.validatedData(data, statusCode: response.statusCode)
+    }
+
+    /// Firmware may report an application failure inside an HTTP 200/400 XML
+    /// response. Only an explicit unsupported status permits route fallback.
+    static func validatedData(_ data: Data, statusCode: Int) throws -> Data {
+        if statusCode == 401 || statusCode == 403 { throw PTZError.permissionDenied }
+        guard data.count <= 131_072 else { throw PTZError.invalidResponse }
+        if [404, 405, 501].contains(statusCode) { throw PTZError.unsupported }
+        let classification = try PTZResponseDocument.validate(data)
+        guard (200...299).contains(statusCode), classification == .notStatus else { throw PTZError.invalidResponse }
         return data
     }
 }
@@ -156,10 +193,35 @@ enum PTZCapabilityDocument {
                        zoomSupport: try boolean(node.child("zoomSupport")))
     }
 
+    /// IPMD's original capability resource can use the same PTZChannel root as
+    /// its configuration. Only explicit axis flags count; enabled, maximum
+    /// speed, presets and current coordinates do not prove movement support.
+    static func capabilityResponse(_ data: Data, channel: Int, videoChannel: Int,
+                                   configuration: Channel?, apiFamily: PTZAPIFamily) throws -> PTZDiscoveryResult {
+        let root = try PTZXMLNode.parse(data)
+        guard root.name == "PTZChannel" else {
+            return try capabilities(data, channel: channel, configuration: configuration, apiFamily: apiFamily)
+        }
+        let detail = try self.configuration(root)
+        guard detail.id == channel, detail.videoInputID == nil || detail.videoInputID == videoChannel else { return .unknown }
+        func merged(_ first: Bool?, _ second: Bool?) -> Bool? {
+            if first == false || second == false { return false }
+            if first == true || second == true { return true }
+            return nil
+        }
+        let combined = Channel(id: channel, videoInputID: detail.videoInputID,
+                               enabled: detail.enabled && configuration?.enabled != false,
+                               panSupport: merged(configuration?.panSupport, detail.panSupport),
+                               tiltSupport: merged(configuration?.tiltSupport, detail.tiltSupport),
+                               zoomSupport: merged(configuration?.zoomSupport, detail.zoomSupport))
+        return channelCapabilities(combined, channel: channel, apiFamily: apiFamily)
+    }
+
     /// Each vendor movement space describes one API, not whether the device is
     /// physically fixed. Older firmware may advertise only continuous control.
     /// Hikvision's documented root is spelled PTZChanelCap (one n).
-    static func capabilities(_ data: Data, channel: Int, configuration: Channel? = nil) throws -> PTZDiscoveryResult {
+    static func capabilities(_ data: Data, channel: Int, configuration: Channel? = nil,
+                             apiFamily: PTZAPIFamily = .isapi) throws -> PTZDiscoveryResult {
         let root = try PTZXMLNode.parse(data)
         guard ["PTZChanelCap", "PTZChannelCap"].contains(root.name) else { throw PTZError.invalidResponse }
         let continuousAllowed = try boolean(root.child("notSupportPTZContinuous")) != true
@@ -175,7 +237,8 @@ enum PTZCapabilityDocument {
         if pan.mode != nil || tilt.mode != nil || zoom.mode != nil {
             return .available(PTZCapabilities(channel: channel, panMode: pan.mode, tiltMode: tilt.mode,
                                               zoomMode: zoom.mode,
-                                              supportsContinuousStop: pan.continuousSupported || tilt.continuousSupported || zoom.continuousSupported))
+                                              supportsContinuousStop: pan.continuousSupported || tilt.continuousSupported || zoom.continuousSupported,
+                                              apiFamily: apiFamily))
         }
         if pan.exists || tilt.exists || zoom.exists { return .unsupported }
         if pan.explicitlyAbsent && tilt.explicitlyAbsent && zoom.explicitlyAbsent { return .unavailable }
@@ -184,14 +247,16 @@ enum PTZCapabilityDocument {
 
     /// The vendor integration guide uses these explicit per-axis flags with
     /// /continuous. A missing capabilities route must not erase that evidence.
-    static func channelCapabilities(_ configuration: Channel?, channel: Int) -> PTZDiscoveryResult {
+    static func channelCapabilities(_ configuration: Channel?, channel: Int,
+                                    apiFamily: PTZAPIFamily = .isapi) -> PTZDiscoveryResult {
         guard let configuration else { return .unknown }
         guard configuration.enabled else { return .unavailable }
         if configuration.panSupport == true || configuration.tiltSupport == true || configuration.zoomSupport == true {
             return .available(PTZCapabilities(channel: channel,
                                               panMode: configuration.panSupport == true ? .continuous : nil,
                                               tiltMode: configuration.tiltSupport == true ? .continuous : nil,
-                                              zoomMode: configuration.zoomSupport == true ? .continuous : nil))
+                                              zoomMode: configuration.zoomSupport == true ? .continuous : nil,
+                                              apiFamily: apiFamily))
         }
         if configuration.panSupport == false && configuration.tiltSupport == false && configuration.zoomSupport == false {
             return .unavailable
@@ -217,11 +282,11 @@ enum PTZCapabilityDocument {
         // An explicit legacy axis flag independently advertises /continuous;
         // unrelated absolute/relative spaces must not erase that evidence.
         let continuousSupported = continuousAllowed && (continuousRange == true || support == true)
-        if timedRange == true {
-            return Axis(mode: .momentary, exists: true, explicitlyAbsent: false, continuousSupported: continuousSupported)
-        }
         if continuousSupported {
             return Axis(mode: .continuous, exists: true, explicitlyAbsent: false, continuousSupported: true)
+        }
+        if timedRange == true {
+            return Axis(mode: .momentary, exists: true, explicitlyAbsent: false, continuousSupported: false)
         }
         let positionOnly = absoluteRange == true || relativeRange == true
         return Axis(mode: nil, exists: support == true || continuousRange == true || positionOnly,
@@ -252,12 +317,26 @@ enum PTZCapabilityDocument {
 @MainActor
 enum PTZCapabilityDetector {
     static func detect(configuration: CameraConfiguration, transport: any PTZDiscoveryTransport) async throws -> PTZDiscoveryResult {
+        let modern = try await detect(configuration: configuration, transport: transport, apiFamily: .isapi)
+        guard modern.allRoutesUnsupported else { return modern.result }
+        try Task.checkCancellation()
+        return try await detect(configuration: configuration, transport: transport, apiFamily: .legacy).result
+    }
+
+    private struct Attempt {
+        let result: PTZDiscoveryResult
+        var allRoutesUnsupported = false
+    }
+
+    private static func detect(configuration: CameraConfiguration, transport: any PTZDiscoveryTransport,
+                               apiFamily: PTZAPIFamily) async throws -> Attempt {
         // A device's explicit videoInputID mapping is authoritative. A legacy
         // control ID is only a fallback where that mapping is not supplied.
         var channel = configuration.ptzEnabled ? configuration.ptzChannel : configuration.channel
         var channelConfiguration: PTZCapabilityDocument.Channel?
+        var collectionUnsupported = false
         do {
-            let data = try await transport.get(.channels)
+            let data = try await transport.get(PTZDiscoveryResource.channels.inFamily(apiFamily))
             let channels = try PTZCapabilityDocument.channels(data)
             try Task.checkCancellation()
             // The vendor schema explicitly links control IDs to video inputs.
@@ -265,52 +344,59 @@ enum PTZCapabilityDetector {
             let mapped = channels.filter { $0.videoInputID == configuration.channel }
             let candidate: PTZCapabilityDocument.Channel?
             if mapped.count == 1 { candidate = mapped[0] }
-            else if !mapped.isEmpty { return .unknown }
+            else if !mapped.isEmpty { return Attempt(result: .unknown) }
             else if let matching = channels.first(where: { $0.id == channel && $0.videoInputID == nil }) { candidate = matching }
             else { candidate = nil }
             if let candidate {
-                guard candidate.enabled else { return .unavailable }
+                guard candidate.enabled else { return Attempt(result: .unavailable) }
                 channel = candidate.id
                 channelConfiguration = candidate
             } else if !channels.isEmpty {
-                return .unknown
+                return Attempt(result: .unknown)
             }
             // Some front-end firmware has an empty collection but exposes the
             // individual capability route. Query only the configured channel.
         } catch PTZError.unsupported {
+            collectionUnsupported = true
             // Some firmware exposes capabilities without the collection route.
             // Probe only the matching channel; never scan or guess NVR channels.
         }
         let capabilityData: Data?
         let result: PTZDiscoveryResult
         do {
-            let data = try await transport.get(.capabilities(channel))
+            let data = try await transport.get(PTZDiscoveryResource.capabilities(channel).inFamily(apiFamily))
             try Task.checkCancellation()
-            let parsed = try PTZCapabilityDocument.capabilities(data, channel: channel, configuration: channelConfiguration)
+            let parsed = try PTZCapabilityDocument.capabilityResponse(data, channel: channel, videoChannel: configuration.channel,
+                                                                      configuration: channelConfiguration, apiFamily: apiFamily)
             capabilityData = data
             result = parsed
         } catch PTZError.unsupported {
             capabilityData = nil
-            result = PTZCapabilityDocument.channelCapabilities(channelConfiguration, channel: channel)
+            result = PTZCapabilityDocument.channelCapabilities(channelConfiguration, channel: channel, apiFamily: apiFamily)
         }
-        if case .available = result { return result }
-        guard channelConfiguration?.hasAxisFlags != true else { return result }
+        if case .available = result { return Attempt(result: result) }
+        if case .unavailable = result { return Attempt(result: result) }
+        guard channelConfiguration?.hasAxisFlags != true else { return Attempt(result: result) }
         // Collection firmware sometimes omits axis flags. A precise read of the
         // same control channel is safe; never enumerate other recorder inputs.
         do {
-            let data = try await transport.get(.configuration(channel))
+            let data = try await transport.get(PTZDiscoveryResource.configuration(channel).inFamily(apiFamily))
             try Task.checkCancellation()
             let detail = try PTZCapabilityDocument.configuration(data)
             guard detail.id == channel,
-                  detail.videoInputID == nil || detail.videoInputID == configuration.channel else { return .unknown }
-            guard detail.enabled else { return .unavailable }
+                  detail.videoInputID == nil || detail.videoInputID == configuration.channel else { return Attempt(result: .unknown) }
+            guard detail.enabled else { return Attempt(result: .unavailable) }
             if let capabilityData {
                 // Keep the original continuous veto when merging legacy flags.
-                return try PTZCapabilityDocument.capabilities(capabilityData, channel: channel, configuration: detail)
+                return Attempt(result: try PTZCapabilityDocument.capabilityResponse(capabilityData, channel: channel,
+                                          videoChannel: configuration.channel, configuration: detail, apiFamily: apiFamily))
             }
-            return PTZCapabilityDocument.channelCapabilities(detail, channel: channel)
+            return Attempt(result: PTZCapabilityDocument.channelCapabilities(detail, channel: channel, apiFamily: apiFamily))
         } catch PTZError.unsupported {
-            return result
+            // Do not route around authentication, malformed XML, an explicit
+            // negative, an ambiguous channel mapping or an advertised method
+            // we cannot implement. Only absent ISAPI routes try the old API.
+            return Attempt(result: result, allRoutesUnsupported: collectionUnsupported && capabilityData == nil)
         }
     }
 }
@@ -370,49 +456,5 @@ final class PTZDiscovery {
         let result = await task.value
         try Task.checkCancellation()
         return result
-    }
-}
-
-private final class PTZXMLNode: NSObject, XMLParserDelegate {
-    let name: String
-    var text = ""
-    var children: [PTZXMLNode] = []
-    private var stack: [PTZXMLNode] = []
-    private var count = 0
-
-    init(name: String) { self.name = name }
-    func child(_ name: String) -> PTZXMLNode? { children.first { $0.name == name } }
-
-    static func parse(_ data: Data) throws -> PTZXMLNode {
-        guard !data.isEmpty, data.count <= 131_072,
-              !String(decoding: data, as: UTF8.self).uppercased().contains("<!DOCTYPE") else { throw PTZError.invalidResponse }
-        let delegate = PTZXMLNode(name: "document")
-        delegate.stack = [delegate]
-        defer { delegate.stack = [] }
-        let parser = XMLParser(data: data)
-        parser.shouldProcessNamespaces = true
-        parser.shouldResolveExternalEntities = false
-        parser.delegate = delegate
-        guard parser.parse(), delegate.children.count == 1, delegate.stack.count == 1,
-              let root = delegate.children.first else { throw PTZError.invalidResponse }
-        return root
-    }
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String]) {
-        count += 1
-        guard stack.count < 32, count <= 4096 else { parser.abortParsing(); return }
-        let node = PTZXMLNode(name: elementName)
-        stack.last?.children.append(node)
-        stack.append(node)
-    }
-    func parser(_ parser: XMLParser, foundCharacters string: String) { stack.last?.text.append(string) }
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if stack.count > 1 { stack.removeLast() }
-    }
-    func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName name: String, value: String?) {
-        parser.abortParsing()
-    }
-    func parser(_ parser: XMLParser, foundExternalEntityDeclarationWithName name: String, publicID: String?, systemID: String?) {
-        parser.abortParsing()
     }
 }

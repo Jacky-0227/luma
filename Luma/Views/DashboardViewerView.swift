@@ -16,9 +16,21 @@ struct DashboardViewerView: View {
     @State private var keepsScreenAwake = false
 
     private var selectedCameras: [CameraConfiguration] { dashboard.cameras(from: store.cameras) }
-    private var pageCount: Int { max(1, (selectedCameras.count + 3) / 4) }
+    private var pageCount: Int { max(1, dashboard.pageCount(from: store.cameras)) }
     private var pageCameras: [CameraConfiguration] {
-        Array(selectedCameras.dropFirst(min(page, pageCount - 1) * 4).prefix(4))
+        dashboard.cameras(onPage: min(page, pageCount - 1), from: store.cameras)
+    }
+    private var columnCount: Int { dynamicTypeSize.isAccessibilitySize ? 1 : min(8, max(1, dashboard.columns)) }
+
+    private struct CameraRow: Identifiable {
+        let cameras: [DashboardCamera]
+        var id: UUID { cameras[0].id }
+    }
+
+    private var cameraRows: [CameraRow] {
+        stride(from: 0, to: session.cameras.count, by: columnCount).map { start in
+            CameraRow(cameras: Array(session.cameras.dropFirst(start).prefix(columnCount)))
+        }
     }
     private var hasPlayingCamera: Bool {
         session.cameras.contains { $0.player?.state == .playing }
@@ -32,7 +44,7 @@ struct DashboardViewerView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Up to four cameras at a time. Fluent streams, sound off.")
+                    Text("Fluent streams, sound off. Every view keeps its original proportions.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -101,20 +113,14 @@ struct DashboardViewerView: View {
     }
 
     private var cameraGrid: some View {
-        // At most four surfaces: eager layout keeps an offscreen accessibility
-        // row from being torn down/recreated by a lazy container while scrolling.
-        Grid(alignment: .top, horizontalSpacing: 12, verticalSpacing: 14) {
-            if dynamicTypeSize.isAccessibilitySize || dashboard.columns == 1 {
-                ForEach(session.cameras) { camera in
-                    GridRow { cameraButton(camera) }
-                }
-            } else {
+        // Keep drawable identities stable while scrolling. The selected page
+        // owns its streams; changing pages retires all of them before replacing.
+        Grid(alignment: .top, horizontalSpacing: columnCount > 2 ? 6 : 12, verticalSpacing: 12) {
+            ForEach(cameraRows) { row in
                 GridRow {
-                    ForEach(session.cameras.prefix(2)) { camera in cameraButton(camera) }
-                }
-                if session.cameras.count > 2 {
-                    GridRow {
-                        ForEach(session.cameras.dropFirst(2)) { camera in cameraButton(camera) }
+                    ForEach(row.cameras) { camera in cameraButton(camera) }
+                    ForEach(0..<(columnCount - row.cameras.count), id: \.self) { _ in
+                        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                     }
                 }
             }
@@ -131,7 +137,7 @@ struct DashboardViewerView: View {
 
     private func cameraButton(_ camera: DashboardCamera) -> some View {
         Button { open(camera.configuration) } label: {
-            DashboardCameraTile(camera: camera)
+            DashboardCameraTile(camera: camera, compact: columnCount > 2)
         }
         .buttonStyle(.plain)
         .disabled(isOpeningCamera || session.isTransitioning)
@@ -188,7 +194,7 @@ struct DashboardViewerView: View {
         releaseScreenAwake()
         let request = UUID()
         navigationRequest = request
-        // The destination is not created until all four old decoders finish
+        // The destination is not created until all old page decoders finish
         // shutting down. Merely hiding their views would leave streams running.
         session.suspend()
         Task { @MainActor in
@@ -209,6 +215,7 @@ struct DashboardViewerView: View {
 
 private struct DashboardCameraTile: View {
     let camera: DashboardCamera
+    let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -227,12 +234,12 @@ private struct DashboardCameraTile: View {
             .clipped()
             VStack(alignment: .leading, spacing: 5) {
                 Text(camera.configuration.name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
-                if let player = camera.player {
+                if let player = camera.player, !compact {
                     DashboardStatusLabel(player: player)
-                } else {
+                } else if camera.player == nil, !compact {
                     Text("Connection unavailable")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -244,7 +251,7 @@ private struct DashboardCameraTile: View {
                     }
                 }
             }
-            .padding(12)
+            .padding(compact ? 6 : 12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(uiColor: .secondarySystemGroupedBackground))

@@ -42,13 +42,17 @@ struct PTZCommand: Equatable, Sendable {
         PTZCommand(pan: 0, tilt: 0, zoom: 0, mode: mode)
     }
 
-    var xml: Data {
+    var xml: Data { xml(for: .isapi) }
+
+    func xml(for family: PTZAPIFamily) -> Data {
         // Vendor PTZ Service Specification 2.0, sections 4.8 and 4.9.
         // A lost connection cannot leave a momentary movement running indefinitely.
         let momentary = mode == .momentary ? "<Momentary><duration>\(Self.durationMilliseconds)</duration></Momentary>" : ""
+        let version = family == .legacy ? "1.0" : "2.0"
+        let namespace = family == .legacy ? "http://www.hikvision.com/ver10/XMLSchema" : "http://www.isapi.org/ver20/XMLSchema"
         return Data("""
         <?xml version="1.0" encoding="UTF-8"?>
-        <PTZData version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><pan>\(pan)</pan><tilt>\(tilt)</tilt><zoom>\(zoom)</zoom>\(momentary)</PTZData>
+        <PTZData version="\(version)" xmlns="\(namespace)"><pan>\(pan)</pan><tilt>\(tilt)</tilt><zoom>\(zoom)</zoom>\(momentary)</PTZData>
         """.utf8)
     }
 }
@@ -58,19 +62,22 @@ struct PTZEndpoint: Sendable {
     let port: Int
     let scheme: String
     let channel: Int
+    let apiFamily: PTZAPIFamily
 
-    init(configuration: CameraConfiguration, requireEnabled: Bool = true) throws {
+    init(configuration: CameraConfiguration, requireEnabled: Bool = true, apiFamily: PTZAPIFamily = .isapi) throws {
         let camera = try configuration.validated()
         guard !requireEnabled || camera.ptzEnabled else { throw PTZError.disabled }
         host = camera.host.lowercased()
         port = camera.controlPort
         scheme = camera.controlUseHTTPS ? "https" : "http"
         channel = camera.ptzChannel
+        self.apiFamily = apiFamily
     }
 
     func request(for command: PTZCommand) throws -> URLRequest {
         let address = host.contains(":") ? "[\(host)]" : host
-        guard let url = URL(string: "\(scheme)://\(address):\(port)/ISAPI/PTZCtrl/channels/\(channel)/\(command.resource)") else {
+        let prefix = apiFamily == .legacy ? "" : "/ISAPI"
+        guard let url = URL(string: "\(scheme)://\(address):\(port)\(prefix)/PTZCtrl/channels/\(channel)/\(command.resource)") else {
             throw PTZError.invalidSettings
         }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData,
@@ -78,7 +85,7 @@ struct PTZEndpoint: Sendable {
         request.httpMethod = "PUT"
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
-        request.httpBody = command.xml
+        request.httpBody = command.xml(for: apiFamily)
         return request
     }
 
@@ -91,20 +98,21 @@ struct PTZEndpoint: Sendable {
 }
 
 enum PTZRequestPolicy {
-    // A move must not occupy the FIFO for the former five-second resource
-    // deadline. Failure still requires Stop because acceptance is uncertain.
+    // Both lanes share a session and its two-second total resource deadline.
+    // The movement request also has a shorter per-request inactivity timeout.
     static func timeout(for command: PTZCommand) -> TimeInterval { command.isStop ? 2 : 1.5 }
 
     static func sessionConfiguration(for command: PTZCommand) -> URLSessionConfiguration {
         let settings = URLSessionConfiguration.ephemeral
-        settings.urlCredentialStorage = nil
+        // Keep ephemeral's private RAM-only credential store, destroyed with
+        // this session. It lets both lanes reuse authentication without Keychain.
         settings.urlCache = nil
         settings.httpCookieStorage = nil
         settings.httpShouldSetCookies = false
         settings.waitsForConnectivity = false
-        settings.timeoutIntervalForRequest = timeout(for: command)
-        settings.timeoutIntervalForResource = timeout(for: command)
-        settings.httpMaximumConnectionsPerHost = 1
+        settings.timeoutIntervalForRequest = 2
+        settings.timeoutIntervalForResource = 2
+        settings.httpMaximumConnectionsPerHost = 2
         return settings
     }
 }
@@ -118,30 +126,27 @@ protocol PTZTransport {
 final class PTZService: PTZTransport {
     private let configuration: CameraConfiguration
     private let password: String
-    private var moveSession: URLSession?
-    private var stopSession: URLSession?
+    private let apiFamily: PTZAPIFamily
+    private var session: URLSession?
 
-    init(configuration: CameraConfiguration, password: String) {
+    init(configuration: CameraConfiguration, password: String, apiFamily: PTZAPIFamily = .isapi) {
         self.configuration = configuration
         self.password = password
+        self.apiFamily = apiFamily
     }
 
     deinit {
-        moveSession?.finishTasksAndInvalidate()
-        stopSession?.finishTasksAndInvalidate()
+        session?.finishTasksAndInvalidate()
     }
 
     func send(_ command: PTZCommand) async throws {
         let endpoint: PTZEndpoint
-        do { endpoint = try PTZEndpoint(configuration: configuration) }
+        do { endpoint = try PTZEndpoint(configuration: configuration, apiFamily: apiFamily) }
         catch { throw PTZError.invalidSettings }
-        var session = command.isStop ? stopSession : moveSession
         if session == nil {
             let settings = PTZRequestPolicy.sessionConfiguration(for: command)
             let authentication = PTZAuthenticationDelegate(endpoint: endpoint, username: configuration.username, password: password)
             session = URLSession(configuration: settings, delegate: authentication, delegateQueue: nil)
-            if command.isStop { stopSession = session }
-            else { moveSession = session }
         }
         guard let session else { throw PTZError.connectionFailed }
         do {
@@ -183,7 +188,7 @@ final class PTZAuthenticationDelegate: NSObject, URLSessionTaskDelegate {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
-        completionHandler(.useCredential, URLCredential(user: username, password: password, persistence: .none))
+        completionHandler(.useCredential, URLCredential(user: username, password: password, persistence: .forSession))
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -196,36 +201,9 @@ enum PTZResponse {
     static func validate(statusCode: Int, body: Data) throws {
         if statusCode == 401 || statusCode == 403 { throw PTZError.permissionDenied }
         if [404, 405, 501].contains(statusCode) { throw PTZError.unsupported }
-        guard (200...299).contains(statusCode), body.count <= 65_536 else { throw PTZError.invalidResponse }
-        let delegate = PTZStatusParser()
-        let parser = XMLParser(data: body)
-        parser.shouldProcessNamespaces = true
-        parser.shouldResolveExternalEntities = false
-        parser.delegate = delegate
-        guard parser.parse(), delegate.root == "ResponseStatus", delegate.codes.count == 1,
-              let code = Int(delegate.codes[0].trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            throw PTZError.invalidResponse
-        }
-        guard code == 0 || code == 1 else { throw PTZError.commandRejected }
-    }
-}
-
-private final class PTZStatusParser: NSObject, XMLParserDelegate {
-    var root: String?
-    var codes: [String] = []
-    private var capturedCode: String?
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String]) {
-        if root == nil { root = elementName }
-        if elementName == "statusCode" { capturedCode = "" }
-    }
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        if capturedCode != nil { capturedCode?.append(string) }
-    }
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "statusCode", let code = capturedCode {
-            codes.append(code)
-            capturedCode = nil
-        }
+        guard body.count <= 65_536 else { throw PTZError.invalidResponse }
+        let result = try PTZResponseDocument.validate(body)
+        guard (200...299).contains(statusCode), result == .success else { throw PTZError.invalidResponse }
     }
 }
 
