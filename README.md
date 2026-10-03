@@ -68,6 +68,8 @@ Version 0.1.4 adds an image-only dashboard wall: 16:9 cells, narrow gutters and 
 
 In full screen, pinch to magnify the picture up to 6× and drag to look around. Tap **1×** to restore the whole picture. Digital zoom preserves proportions, keeps the same video connection, and does not move the camera or change the original snapshots/recordings. Leaving full screen or rotating the device resets the magnification.
 
+See the [0.1.4 validation record and gesture screenshots](docs/validation-0.1.4.md) for tested scope and remaining device checks.
+
 Use **Dashboard → +** to name a group, choose cameras and arrange their order. Choose 4, 8, 16 or a custom number of views per page (1–64), and 1–8 columns. The first page forms its cover. All tiles preserve the source aspect ratio with black bars when needed; video is never stretched or squeezed. Covers use small in-memory device snapshots, so devices without a compatible snapshot endpoint show a placeholder. Dashboard layouts stay on this iPhone and are not included in camera configuration exports. Higher live-view counts use more decoding capacity, memory and bandwidth; the configurable limit is not a guarantee of smooth playback on every phone.
 
 Version 0.1.3 adds older Hikvision API/response formats and sends Stop without waiting for an outstanding move response. Its [protocol research map](docs/PTZ-protocol-reference.md) distinguishes implemented ISAPI/IPMD support from ONVIF, PSIA and SDK interfaces that have only been researched.
