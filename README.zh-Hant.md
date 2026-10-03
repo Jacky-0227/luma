@@ -33,14 +33,14 @@ Luma 是一款面向 **iOS 26 及以上版本**的區域網路攝影機檢視器
 ## 介面預覽
 
 <p align="center">
-  <img src="docs/assets/home-zh-Hant.png" width="220" alt="Luma 繁體中文首頁">
-  <img src="docs/assets/camera-editor-zh-Hans.png" width="220" alt="Luma 簡體中文新增設備頁">
-  <img src="docs/assets/settings-en.png" width="220" alt="Luma 英文設定頁">
+  <img src="docs/assets/welcome-en.png" width="220" alt="Luma 首次歡迎頁">
+  <img src="docs/assets/home-en.png" width="220" alt="Luma 攝影機欄目">
+  <img src="docs/assets/dashboard-groups-en.png" width="220" alt="Luma 儀表板分組，離線預留圖示">
 </p>
 
 <p align="center">繁體中文 · 簡體中文 · English</p>
 
-以上為 iOS 26 模擬器的真實介面截圖，不含真實攝影機畫面。
+以上為 0.1.3 在 iOS 26 模擬器中的真實截圖，展示首次歡迎頁、攝影機欄目及儀表板。圖片使用英文；應用程式支援三種語言，不含真實攝影機畫面。
 
 <details>
 <summary>自訂儀表板 · 分組與攝影機排序</summary>
@@ -48,7 +48,7 @@ Luma 是一款面向 **iOS 26 及以上版本**的區域網路攝影機檢視器
   <img src="docs/assets/dashboard-groups-en.png" width="250" alt="自訂儀表板分組，封面為離線預留圖示">
   <img src="docs/assets/dashboard-editor-en.png" width="250" alt="儀表板編輯頁的攝影機選擇、順序與版面">
 </p>
-0.1.2 模擬器實際截圖。測試攝影機處於離線狀態，封面顯示預留圖示，不包含真實監控畫面。
+0.1.3 模擬器實際截圖。測試攝影機處於離線狀態，封面顯示預留圖示，不包含真實監控畫面。
 </details>
 
 <details>

@@ -29,12 +29,12 @@ Luma 是面向 **iOS 26 及以上**的局域网摄像头查看器，使用 Swift
 
 ## 界面预览
 
-以下为 iOS 26 模拟器实际运行截屏，依次展示繁体中文、简体中文和英文界面，不含真实摄像头画面。
+以下为 0.1.3 在 iOS 26 模拟器中的实际截屏，展示首次欢迎页、摄像头栏目和仪表板。图片使用英文；应用支持英文、繁体和简体，不含真实摄像头画面。
 
 <p align="center">
-  <img src="docs/assets/home-zh-Hant.png" width="220" alt="Luma 繁体中文首页，iOS 26 模拟器截屏">
-  <img src="docs/assets/camera-editor-zh-Hans.png" width="220" alt="Luma 简体中文设备添加页，iOS 26 模拟器截屏">
-  <img src="docs/assets/settings-en.png" width="220" alt="Luma 英文设置页，iOS 26 模拟器截屏">
+  <img src="docs/assets/welcome-en.png" width="220" alt="Luma 首次欢迎页">
+  <img src="docs/assets/home-en.png" width="220" alt="Luma 摄像头栏目">
+  <img src="docs/assets/dashboard-groups-en.png" width="220" alt="Luma 仪表板分组，离线占位图">
 </p>
 
 <a id="features"></a>
@@ -45,7 +45,7 @@ Luma 是面向 **iOS 26 及以上**的局域网摄像头查看器，使用 Swift
   <img src="docs/assets/dashboard-groups-en.png" width="250" alt="自定义仪表板分组，封面为离线占位图">
   <img src="docs/assets/dashboard-editor-en.png" width="250" alt="仪表板编辑页的摄像头选择、顺序与布局">
 </p>
-0.1.2 模拟器实际截屏。测试摄像头处于离线状态，封面显示占位图，不包含真实监控画面。
+0.1.3 模拟器实际截屏。测试摄像头处于离线状态，封面显示占位图，不包含真实监控画面。
 </details>
 
 <details>

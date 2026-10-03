@@ -25,11 +25,11 @@ Download packages and read the validation scope for each version in [Releases](h
 ## Interface preview
 
 <p align="center">
-  <img src="docs/assets/home-zh-Hant.png" width="220" alt="Traditional Chinese home screen in dark mode">
-  <img src="docs/assets/camera-editor-zh-Hans.png" width="220" alt="Simplified Chinese camera editor in dark mode">
-  <img src="docs/assets/settings-en.png" width="220" alt="English settings screen in light mode">
+  <img src="docs/assets/welcome-en.png" width="220" alt="First-launch welcome screen">
+  <img src="docs/assets/home-en.png" width="220" alt="Cameras screen with its section title">
+  <img src="docs/assets/dashboard-groups-en.png" width="220" alt="Dashboard groups with offline placeholders">
 </p>
-<p align="center"><sub>Actual iOS 26 simulator screenshots · No real camera footage or personal device data</sub></p>
+<p align="center"><sub>Actual 0.1.3 iOS 26 simulator screens · English shown; English, Traditional Chinese and Simplified Chinese supported · No real camera footage or personal device data</sub></p>
 
 <details>
 <summary>Custom dashboards · grouping and camera order</summary>
@@ -37,7 +37,7 @@ Download packages and read the validation scope for each version in [Releases](h
   <img src="docs/assets/dashboard-groups-en.png" width="250" alt="Custom dashboard groups with snapshot placeholders">
   <img src="docs/assets/dashboard-editor-en.png" width="250" alt="Dashboard editor showing camera selection, order and layout">
 </p>
-Actual 0.1.2 simulator screens. The synthetic test cameras are offline, so the covers show placeholders.
+Actual 0.1.3 simulator screens. The synthetic test cameras are offline, so the covers show placeholders.
 </details>
 
 <details>
