@@ -243,6 +243,8 @@ private struct LiveCameraView: View {
                 .padding(.vertical, 8)
                 .modifier(GlassPanel(radius: 30))
                 .padding(14)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(player.state.displayTitle))
                 .accessibilityIdentifier("player.status")
         }
         .overlay(alignment: .bottomTrailing) {

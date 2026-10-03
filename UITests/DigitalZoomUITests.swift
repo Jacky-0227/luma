@@ -1,7 +1,6 @@
 import XCTest
 
 final class DigitalZoomUITests: XCTestCase {
-    override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
     func testFullscreenPinchPanResetKeepsRealVideoConnected() async throws {
@@ -19,7 +18,14 @@ final class DigitalZoomUITests: XCTestCase {
                                "-AppleLanguages", "(en)", "-AppleLocale", "en"]
         app.launchEnvironment["LUMA_UI_RTSP_PORT"] = String(try XCTUnwrap(fixture.port))
         app.launch()
-        defer { app.terminate() }
+        defer {
+            capture("digital-zoom-final-state")
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "digital-zoom-hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+            app.terminate()
+        }
         let camera = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "camera.card.")).firstMatch
         XCTAssertTrue(camera.waitForExistence(timeout: 10))
         camera.tap()
@@ -58,8 +64,10 @@ final class DigitalZoomUITests: XCTestCase {
     private func waitUntil(_ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(20))
         while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
-        XCTAssertTrue(condition())
+        if !condition() { throw ZoomTestError.conditionTimedOut }
     }
+
+    private enum ZoomTestError: Error { case conditionTimedOut }
 
     @MainActor
     private func capture(_ name: String) {

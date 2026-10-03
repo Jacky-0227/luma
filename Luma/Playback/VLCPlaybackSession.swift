@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UIKit
 
 /// Only value snapshots cross the Objective-C callback boundary. No URL, error
@@ -201,6 +202,10 @@ final class VLCPlaybackSession {
             hasVideo = true
             if !isRetiring { onEvent?(event) }
         case .snapshotSaved(let path):
+            let matchesPreview = previewCapture.map { URL(fileURLWithPath: path).standardizedFileURL == $0.fileURL } ?? false
+            let matchesManual = capture.map { URL(fileURLWithPath: path).standardizedFileURL == $0.snapshotURL.standardizedFileURL } ?? false
+            Logger(subsystem: "app.luma.viewer", category: "Capture")
+                .notice("snapshot_callback preview=\(matchesPreview) manual=\(matchesManual)")
             if let previewCapture, previewSubmitted,
                URL(fileURLWithPath: path).standardizedFileURL == previewCapture.fileURL {
                 finishPreview(success: true)

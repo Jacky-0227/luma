@@ -32,6 +32,7 @@ final class RTSPPlaybackIntegrationTests: XCTestCase {
         }
         session.onCaptureEvent = { event in
             if case .saved(.snapshot) = event { probe.snapshotSaved = true; fixture.mark("snapshot saved") }
+            if case .failed = event { fixture.mark("snapshot failure callback") }
         }
         do {
             fixture.mark("playback start requested")
@@ -284,10 +285,15 @@ private final class VideoHost {
         let controller = UIViewController()
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        controller.view.layoutIfNeeded()
         surface = UIView(frame: controller.view.bounds)
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         surface.backgroundColor = .black
         controller.view.addSubview(surface)
+        surface.layoutIfNeeded()
+        XCTAssertGreaterThan(surface.bounds.width, 0)
+        XCTAssertGreaterThan(surface.bounds.height, 0)
     }
     func close() { window.isHidden = true; previousWindow?.makeKeyAndVisible() }
 }

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != '--ptz-only' ] && [ "$1" != '--unit-only' ]; }; then
-  echo 'Usage: ci-test-ptz.sh [--ptz-only|--unit-only]' >&2
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != '--ptz-only' ] && [ "$1" != '--unit-only' ] && [ "$1" != '--viewer-only' ]; }; then
+  echo 'Usage: ci-test-ptz.sh [--ptz-only|--unit-only|--viewer-only]' >&2
   exit 2
 fi
 TEST_SUITES=(
@@ -30,6 +30,10 @@ if [ "${1:-}" != '--ptz-only' ]; then
     TEST_SUITES+=(LumaUITests/DashboardUITests LumaUITests/WelcomeUITests LumaUITests/DigitalZoomUITests)
     TEST_SCOPE="$TEST_SCOPE + dashboard editor/first-launch welcome UI"
   fi
+fi
+if [ "${1:-}" = '--viewer-only' ]; then
+  TEST_SUITES=(LumaTests/DigitalZoomTests LumaTests/RTSPPlaybackIntegrationTests LumaTests/VLCCaptureIntegrationTests LumaUITests/DigitalZoomUITests)
+  TEST_SCOPE='Native digital zoom/rotation/accessibility + real RTSP playback + real VLC captures + fullscreen pinch/pan/reset UI'
 fi
 TEST_ARGUMENTS=()
 for SUITE in "${TEST_SUITES[@]}"; do

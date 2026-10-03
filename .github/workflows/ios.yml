@@ -18,6 +18,11 @@ on:
         type: boolean
         required: false
         default: false
+      viewer_only:
+        description: Run native digital zoom, real playback/capture and fullscreen gesture regressions
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -56,8 +61,11 @@ jobs:
           FOCUSED_TESTS: ${{ inputs.focused_tests }}
           PTZ_ONLY: ${{ inputs.ptz_only }}
           UNIT_ONLY: ${{ inputs.unit_only }}
+          VIEWER_ONLY: ${{ inputs.viewer_only }}
         run: |
-          if [ "$UNIT_ONLY" = 'true' ]; then
+          if [ "$VIEWER_ONLY" = 'true' ]; then
+            bash scripts/ci-test-ptz.sh --viewer-only
+          elif [ "$UNIT_ONLY" = 'true' ]; then
             bash scripts/ci-test-ptz.sh --unit-only
           elif [ "$PTZ_ONLY" = 'true' ]; then
             bash scripts/ci-test-ptz.sh --ptz-only

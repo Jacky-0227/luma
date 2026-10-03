@@ -40,7 +40,7 @@ final class DigitalZoomTests: XCTestCase {
         XCTAssertEqual(view.zoomScale, 1)
         XCTAssertEqual(view.contentOffset, .zero)
         XCTAssertFalse(view.panGestureRecognizer.isEnabled)
-        XCTAssertFalse(view.pinchGestureRecognizer?.isEnabled ?? true)
+        XCTAssertFalse(view.pinchGestureRecognizer?.isEnabled ?? false)
         view.configure(enabled: true, resetID: resetID)
         view.setZoomScale(2, animated: false)
         view.frame.size = CGSize(width: 780, height: 390)

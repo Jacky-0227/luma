@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Synchronization
 import UIKit
 @preconcurrency import MobileVLCKit
@@ -81,6 +82,7 @@ private enum VLCEventPolicy {
 /// Replace this compatibility boundary when VLCKit provides Swift isolation and
 /// completion-based shutdown. Do not make VLCMediaPlayer generally Sendable.
 final class VLCNativeDriver: @unchecked Sendable {
+    private static let captureLog = Logger(subsystem: "app.luma.viewer", category: "Capture")
     private let queue = VLCSDKQueue.queue
     private let cancelled = Mutex(false)
     private let onEvent: @MainActor @Sendable (VLCPlaybackEvent) -> Void
@@ -198,6 +200,8 @@ final class VLCNativeDriver: @unchecked Sendable {
     func captureSnapshot(at path: String, submitted: @escaping @MainActor @Sendable (Bool) -> Void) {
         queue.async { [self] in
             let accepted = !isCancelled && player.map { LumaRequestSnapshot($0, path) } == true
+            let stats = media?.statistics
+            Self.captureLog.notice("snapshot_requested accepted=\(accepted) decoded=\(stats?.decodedVideo ?? 0) displayed=\(stats?.displayedPictures ?? 0)")
             DispatchQueue.main.async { submitted(accepted) }
         }
     }
