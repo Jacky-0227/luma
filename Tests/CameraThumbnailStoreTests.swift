@@ -25,7 +25,18 @@ final class CameraThumbnailStoreTests: XCTestCase {
         XCTAssertEqual(try directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
         let recordURL = directory.appendingPathComponent(camera.id.uuidString + ".json")
         let attributes = try FileManager.default.attributesOfItem(atPath: recordURL.path)
-        XCTAssertEqual(attributes[.protectionKey] as? FileProtectionType, .complete)
+        // Foundation may bridge this NSString attribute as String, not the
+        // Swift wrapper. Simulator filesystems can omit Data Protection metadata;
+        // lock-state encryption still requires a physical device check.
+        let protection = (attributes[.protectionKey] as? FileProtectionType)?.rawValue
+            ?? (attributes[.protectionKey] as? String)
+        #if targetEnvironment(simulator)
+        if attributes[.protectionKey] != nil {
+            XCTAssertEqual(protection, FileProtectionType.complete.rawValue)
+        }
+        #else
+        XCTAssertEqual(protection, FileProtectionType.complete.rawValue)
+        #endif
         let record = try String(contentsOf: recordURL, encoding: .utf8)
         XCTAssertFalse(record.contains("camera.local"))
         XCTAssertFalse(record.contains("synthetic-user"))
