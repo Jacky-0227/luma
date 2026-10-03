@@ -258,18 +258,23 @@ final class RTSPLoopbackFixture {
 
     private func stream(_ peer: Peer) {
         guard let video, peer.framesTask == nil else { return }
-        peer.framesTask = Task { @MainActor [weak self, weak peer] in
+        let connection = peer.connection
+        // XCTest's synchronous tap/pinch calls occupy the runner's main actor.
+        // A camera keeps transmitting during those gestures; this fixture must
+        // do so as well, rather than manufacturing a multi-second video stall.
+        peer.framesTask = Task.detached { [weak self] in
             var frameIndex = 0
             var sequence: UInt16 = 1000
             var timestamp: UInt32 = 0
             var packetCount: UInt32 = 0
             var octetCount: UInt32 = 0
             while !Task.isCancelled {
-                guard let self, let peer, self.peers[peer.id] != nil else { return }
                 if frameIndex.isMultiple(of: 10) {
-                    self.senderReport(peer, timestamp: timestamp, packets: packetCount, octets: octetCount)
+                    let report = Self.senderReport(timestamp: timestamp, packets: packetCount, octets: octetCount)
+                    connection.send(content: report, completion: .contentProcessed { _ in })
                 }
                 let frame = video.frames[frameIndex % video.frames.count]
+                var packetsInFrame = 0
                 for (index, nal) in frame.enumerated() {
                     let payloads = Self.payloads(nal)
                     for (part, payload) in payloads.enumerated() {
@@ -279,13 +284,17 @@ final class RTSPLoopbackFixture {
                         packet.append(payload)
                         var interleaved = Data([0x24, 0, UInt8(packet.count >> 8), UInt8(packet.count & 255)])
                         interleaved.append(packet)
-                        if self.sentVideoPackets == 0 { self.mark("first RTP packet sent") }
-                        self.send(interleaved, peer: peer)
-                        self.sentVideoPackets += 1
+                        connection.send(content: interleaved, completion: .contentProcessed { _ in })
+                        packetsInFrame += 1
                         packetCount &+= 1
                         octetCount &+= UInt32(payload.count)
                         sequence &+= 1
                     }
+                }
+                Task { @MainActor [weak self, packetsInFrame] in
+                    guard let self else { return }
+                    if self.sentVideoPackets == 0 { self.mark("first RTP packet sent") }
+                    self.sentVideoPackets += packetsInFrame
                 }
                 timestamp &+= 9_000
                 frameIndex += 1
@@ -294,7 +303,7 @@ final class RTSPLoopbackFixture {
         }
     }
 
-    private func senderReport(_ peer: Peer, timestamp: UInt32, packets: UInt32, octets: UInt32) {
+    private nonisolated static func senderReport(timestamp: UInt32, packets: UInt32, octets: UInt32) -> Data {
         // RFC 3550 sender reports map the 90 kHz video clock to wall time.
         let ntp = Date().timeIntervalSince1970 + 2_208_988_800
         let seconds = UInt32(ntp)
@@ -305,10 +314,10 @@ final class RTSPLoopbackFixture {
         }
         var interleaved = Data([0x24, 1, 0, UInt8(packet.count)])
         interleaved.append(packet)
-        send(interleaved, peer: peer)
+        return interleaved
     }
 
-    private static func payloads(_ nal: Data) -> [Data] {
+    private nonisolated static func payloads(_ nal: Data) -> [Data] {
         guard nal.count > 1_200, let header = nal.first else { return [nal] }
         let bytes = [UInt8](nal.dropFirst())
         return stride(from: 0, to: bytes.count, by: 1_198).map { start in

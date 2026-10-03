@@ -33,6 +33,7 @@ final class DigitalZoomUITests: XCTestCase {
         try await waitUntil { status.exists && status.label.contains("Live") && fixture.sentVideoPackets > 0 }
         let initialConnections = fixture.connectionCount
         let initialPlays = fixture.playRequests
+        let initialPackets = fixture.sentVideoPackets
         let fullscreen = app.buttons["player.fullscreen"]
         fullscreen.tap()
         try await waitUntil { fullscreen.label == "Exit full screen" }
@@ -55,9 +56,9 @@ final class DigitalZoomUITests: XCTestCase {
         try await waitUntil { fullscreen.label == "Full screen" }
         XCTAssertEqual(video.value as? String, "1.0×")
         XCTAssertFalse(app.buttons["player.zoom.reset"].exists)
+        try await waitUntil { status.label.contains("Live") && fixture.sentVideoPackets > initialPackets + 30 }
         XCTAssertEqual(fixture.connectionCount, initialConnections, "Display gestures must not reopen RTSP.")
         XCTAssertEqual(fixture.playRequests, initialPlays)
-        XCTAssertTrue(status.label.contains("Live"))
     }
 
     @MainActor
