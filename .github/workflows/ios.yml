@@ -23,6 +23,11 @@ on:
         type: boolean
         required: false
         default: false
+      package_only:
+        description: Package previously verified source without rerunning tests (report prior validation separately)
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -38,7 +43,7 @@ concurrency:
 
 jobs:
   build:
-    name: Test on iOS 26 and package unsigned IPA
+    name: Validate and package unsigned iPhone IPA
     runs-on: macos-15
     timeout-minutes: 35
     env:
@@ -57,6 +62,7 @@ jobs:
         run: bash scripts/ci-bootstrap.sh
 
       - name: Run model and interface tests
+        if: ${{ !inputs.package_only }}
         env:
           FOCUSED_TESTS: ${{ inputs.focused_tests }}
           PTZ_ONLY: ${{ inputs.ptz_only }}

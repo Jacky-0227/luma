@@ -12,8 +12,12 @@ struct RTSPH264Pattern: Sendable {
 
     @MainActor
     static func make() async throws -> RTSPH264Pattern {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("luma-rtsp-\(UUID().uuidString).mp4")
-        defer { try? FileManager.default.removeItem(at: file) }
+        // A newly booted hosted test container need not have a tmp directory.
+        // Create the parent explicitly before AVAssetWriter opens its output.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("luma-rtsp-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("pattern.mp4")
         let width = 160, height = 96
         let writer = try AVAssetWriter(outputURL: file, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
