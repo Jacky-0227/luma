@@ -42,3 +42,19 @@ See the broader [protocol coverage and research map · 協定資料 · 协议资
 - [Apple ephemeral credential storage](https://developer.apple.com/documentation/foundation/urlsessionconfiguration/urlcredentialstorage): session-scoped private memory storage.
 
 Tests use synthetic protocol fixtures. No physical device response, footage or credentials are bundled with these examples.
+
+## Control readiness and visible latency / 控制預熱與畫面延遲 / 控制预热与画面延迟
+
+In 0.1.4, a visible live view makes a read-only GET to the detected API family’s channel status endpoint before control use, then at most once every 20 seconds while idle. The same private session retains Digest credentials and keep-alive. Touch-down or Stop cancels an unfinished readiness read; an unsupported status resource does not disable detected controls. Navigation/background cancellation stops readiness work. No movement is used to warm a connection.
+
+0.1.4 在即時畫面可見時，以唯讀 GET 預先查詢已偵測介面的通道狀態，閒置時最多每 20 秒再查一次，同一私有連線保留 Digest 驗證。按下方向鍵或停止會取消尚未完成的預熱；不支援狀態查詢不會停用已識別的控制。離開或進入背景時取消預熱，不以移動攝影機預熱。
+
+0.1.4 在实时画面可见时，以只读 GET 预先查询已检测接口的通道状态，空闲时最多每 20 秒再查一次，同一私有连接保留 Digest 认证。按下方向键或停止会取消尚未完成的预热；不支持状态查询不会停用已识别的控制。离开或进入后台时取消预热，不以移动摄像头预热。
+
+Single-camera RTSP playback uses `network-caching=100` and `clock-jitter=100`; dashboards retain `network-caching=500`. Audio/video synchronization remains enabled. Smaller buffers reduce client-side waiting but do not remove camera encoding, frame-rate, transport or motor latency. Poor networks may show more stutter.
+
+單路 RTSP 使用 100 毫秒網路緩衝及 100 毫秒額外時鐘補償上限，儀表板保留 500 毫秒緩衝；音畫同步仍啟用。這減少用戶端等待，但不會消除攝影機編碼、幀率、傳輸與馬達延遲；網路不穩時可能較易卡頓。
+
+单路 RTSP 使用 100 毫秒网络缓冲及 100 毫秒额外时钟补偿上限，仪表板保留 500 毫秒缓冲；音画同步仍启用。这减少客户端等待，但不会消除摄像头编码、帧率、传输与马达延迟；网络不稳时可能较易卡顿。
+
+Sources: [Hikvision status resource](https://open.hikvision.com/hardware/v2/08%E5%8D%8F%E8%AE%AE%E9%80%8F%E4%BC%A0/%E4%BA%91%E5%8F%B0%E5%92%8C%E8%B7%9F%E9%9A%8F%E5%AE%9A%E4%BD%8D.html), [VLC 3.0.21 RTSP PTS delay](https://github.com/videolan/vlc/blob/3.0.21/modules/access/live555.cpp#L1673), [VLC clock compensation](https://github.com/videolan/vlc/blob/3.0.21/src/input/es_out.c#L2368).

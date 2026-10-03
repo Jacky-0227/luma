@@ -61,8 +61,8 @@ final class VLCPlaybackSession {
     private var retirementRetainer: VLCPlaybackSession?
     private var retirementFinished = false
 
-    init(url: URL, useTCP: Bool) {
-        driver = VLCNativeDriver(url: url, useTCP: useTCP) { [weak self] event in
+    init(url: URL, useTCP: Bool, profile: PlaybackProfile = .interactive) {
+        driver = VLCNativeDriver(url: url, useTCP: useTCP, profile: profile) { [weak self] event in
             self?.handle(event)
         }
     }

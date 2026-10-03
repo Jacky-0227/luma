@@ -26,6 +26,7 @@ final class CameraPlayer {
 
     @ObservationIgnored private let configuration: CameraConfiguration
     @ObservationIgnored private let password: String
+    @ObservationIgnored private let playbackProfile: PlaybackProfile
     @ObservationIgnored private let savesPreview: Bool
     @ObservationIgnored private let thumbnailStore: CameraThumbnailStore?
     @ObservationIgnored private var previewCaptured = false
@@ -51,9 +52,10 @@ final class CameraPlayer {
     @ObservationIgnored private var stopWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(configuration: CameraConfiguration, password: String, savesPreview: Bool = false,
-         thumbnailStore: CameraThumbnailStore? = nil) {
+         thumbnailStore: CameraThumbnailStore? = nil, playbackProfile: PlaybackProfile = .interactive) {
         self.configuration = configuration
         self.password = password
+        self.playbackProfile = playbackProfile
         self.savesPreview = savesPreview
         self.thumbnailStore = thumbnailStore
         self.quality = configuration.defaultQuality
@@ -197,7 +199,7 @@ final class CameraPlayer {
         }
 
         state = .connecting
-        let nextSession = VLCPlaybackSession(url: url, useTCP: configuration.useTCP)
+        let nextSession = VLCPlaybackSession(url: url, useTCP: configuration.useTCP, profile: playbackProfile)
         let id = nextSession.id
         nextSession.onEvent = { [weak self] event in
             self?.receive(event, from: id)

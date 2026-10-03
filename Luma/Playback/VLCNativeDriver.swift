@@ -98,7 +98,7 @@ final class VLCNativeDriver: @unchecked Sendable {
     private var firstFrameReported = false
 
     @MainActor
-    init(url: URL, useTCP: Bool, onEvent: @escaping @MainActor @Sendable (VLCPlaybackEvent) -> Void) {
+    init(url: URL, useTCP: Bool, profile: PlaybackProfile, onEvent: @escaping @MainActor @Sendable (VLCPlaybackEvent) -> Void) {
         VLCEventPolicy.install()
         self.onEvent = onEvent
         rtspHost = url.scheme?.lowercased() == "rtsp" ? url.host : nil
@@ -112,7 +112,9 @@ final class VLCNativeDriver: @unchecked Sendable {
             let nextMedia = VLCMedia(url: url)
             nextMedia.metaData.title = "Luma"
             nextMedia.metaData.url = nil
-            nextMedia.addOption(":network-caching=500")
+            if url.scheme?.lowercased() == "rtsp" {
+                for option in profile.mediaOptions { nextMedia.addOption(option) }
+            }
             if useTCP { nextMedia.addOption(":rtsp-tcp") }
             let nextBridge = VLCEventBridge { [weak self] event in self?.enqueue(event) }
             player = nextPlayer

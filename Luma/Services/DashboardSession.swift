@@ -73,7 +73,7 @@ final class DashboardSession {
                             let password = try store.password(for: camera)
                             var preview = camera
                             preview.defaultQuality = .sub
-                            let player = CameraPlayer(configuration: preview, password: password)
+                            let player = CameraPlayer(configuration: preview, password: password, playbackProfile: .dashboard)
                             player.setMuted(true)
                             return DashboardCamera(configuration: camera, player: player, failure: nil)
                         } catch {

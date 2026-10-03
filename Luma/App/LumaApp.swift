@@ -57,7 +57,15 @@ struct LumaApp: App {
             let location = FileManager.default.temporaryDirectory
                 .appendingPathComponent("LumaUITests-\(UUID().uuidString)", isDirectory: true)
                 .appendingPathComponent("cameras.json")
-            return CameraStore(storageURL: location, credentials: UITestCredentials())
+            let store = CameraStore(storageURL: location, credentials: UITestCredentials())
+            if arguments.contains("--ui-test-wall") {
+                // Isolated UI fixtures; no user devices, accounts or saved data.
+                for index in 1...16 {
+                    let camera = CameraConfiguration(name: String(format: "View %02d", index), host: "127.0.0.1", port: 9)
+                    try? store.save(camera, password: "")
+                }
+            }
+            return store
         }
         #endif
         return CameraStore()

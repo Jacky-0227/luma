@@ -85,6 +85,13 @@ final class PTZTests: XCTestCase {
         XCTAssertNil(request.url?.user)
         XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
         XCTAssertNoThrow(try PTZResponse.validate(statusCode: 200, body: Data("<ResponseStaus><statusCode>1</statusCode></ResponseStaus>".utf8)))
+        let readiness = try endpoint.statusRequest()
+        XCTAssertEqual(readiness.httpMethod, "GET")
+        XCTAssertNil(readiness.httpBody)
+        XCTAssertEqual(readiness.url?.path, "/PTZCtrl/channels/7/status")
+        XCTAssertEqual(readiness.url?.port, 80)
+        XCTAssertNil(readiness.url?.user)
+        XCTAssertNil(readiness.value(forHTTPHeaderField: "Authorization"))
     }
 
     func testAuthenticationIsBoundToEndpointAndSecureMethod() throws {

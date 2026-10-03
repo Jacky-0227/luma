@@ -42,37 +42,23 @@ struct DashboardViewerView: View {
 
     private var content: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Fluent streams, sound off. Every view keeps its original proportions.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
+            VStack(alignment: .leading, spacing: 12) {
                 if selectedCameras.isEmpty {
                     ContentUnavailableView("No cameras yet", systemImage: "square.grid.2x2", description: Text("Add a camera from the home screen to use the dashboard."))
                 } else {
                     cameraGrid
                     if pageCount > 1 { pageControls }
-                    Label("Tap a camera to open its live view and controls.", systemImage: "arrow.up.left.and.arrow.down.right")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if pageCameras.contains(where: { !$0.customPath.isEmpty }) {
-                        Text("Cameras with a custom path use that stream in the dashboard.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: 1000)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
         }
+        .scrollIndicators(.hidden)
         .background { LumaBackground() }
         .navigationTitle(dashboard.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Reconnect cameras", systemImage: "arrow.clockwise") { synchronize(forceRestart: true) }
@@ -115,7 +101,7 @@ struct DashboardViewerView: View {
     private var cameraGrid: some View {
         // Keep drawable identities stable while scrolling. The selected page
         // owns its streams; changing pages retires all of them before replacing.
-        Grid(alignment: .top, horizontalSpacing: columnCount > 2 ? 6 : 12, verticalSpacing: 12) {
+        Grid(alignment: .top, horizontalSpacing: 4, verticalSpacing: 4) {
             ForEach(cameraRows) { row in
                 GridRow {
                     ForEach(row.cameras) { camera in cameraButton(camera) }
@@ -137,10 +123,14 @@ struct DashboardViewerView: View {
 
     private func cameraButton(_ camera: DashboardCamera) -> some View {
         Button { open(camera.configuration) } label: {
-            DashboardCameraTile(camera: camera, compact: columnCount > 2)
+            DashboardCameraTile(camera: camera)
         }
         .buttonStyle(.plain)
         .disabled(isOpeningCamera || session.isTransitioning)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(camera.configuration.name))
+        .accessibilityValue(Text(camera.player.map { DashboardCameraTile.status(for: $0.state) } ?? String(localized: "Connection unavailable")))
+        .accessibilityHint(Text("Open live view"))
         .accessibilityIdentifier("dashboard.camera.\(camera.id)")
     }
 
@@ -215,49 +205,34 @@ struct DashboardViewerView: View {
 
 private struct DashboardCameraTile: View {
     let camera: DashboardCamera
-    let compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack {
-                Color.black
+        // The cell determines its size. The native drawable only fills that
+        // proposal and keeps the stream's display aspect ratio (letterboxed).
+        Color.black
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .overlay {
                 if let player = camera.player {
                     VideoSurface(player: player)
                     DashboardPlaybackOverlay(player: player)
                 } else {
                     Image(systemName: "key.slash")
-                        .font(.title2)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.65))
                 }
             }
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .clipped()
-            VStack(alignment: .leading, spacing: 5) {
-                Text(camera.configuration.name)
-                    .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                if let player = camera.player, !compact {
-                    DashboardStatusLabel(player: player)
-                } else if camera.player == nil, !compact {
-                    Text("Connection unavailable")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if let failure = camera.failure {
-                        Text(failure)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .padding(compact ? 6 : 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipShape(.rect(cornerRadius: 8))
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.07), lineWidth: 0.5) }
+    }
+
+    static func status(for state: PlaybackState) -> String {
+        switch state {
+        case .idle: String(localized: "Paused")
+        case .connecting: String(localized: "Connecting")
+        case .buffering: String(localized: "Buffering")
+        case .playing: String(localized: "Live · Muted")
+        case .failed: String(localized: "Connection unavailable")
         }
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(.rect(cornerRadius: 20))
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(Text("Open live view"))
     }
 }
 
@@ -277,35 +252,6 @@ private struct DashboardPlaybackOverlay: View {
         case .failed:
             Color.black
             Image(systemName: "video.slash").font(.title2).foregroundStyle(.white.opacity(0.8))
-        }
-    }
-}
-
-private struct DashboardStatusLabel: View {
-    let player: CameraPlayer
-
-    var body: some View {
-        Label(title, systemImage: symbol)
-            .font(.caption)
-            .foregroundStyle(player.state == .playing ? Color.accentColor : Color.secondary)
-    }
-
-    private var title: String {
-        switch player.state {
-        case .idle: String(localized: "Paused")
-        case .connecting: String(localized: "Connecting")
-        case .buffering: String(localized: "Buffering")
-        case .playing: String(localized: "Live · Muted")
-        case .failed: String(localized: "Connection unavailable")
-        }
-    }
-
-    private var symbol: String {
-        switch player.state {
-        case .playing: "speaker.slash"
-        case .connecting, .buffering: "arrow.triangle.2.circlepath"
-        case .failed: "exclamationmark.circle"
-        case .idle: "pause.circle"
         }
     }
 }

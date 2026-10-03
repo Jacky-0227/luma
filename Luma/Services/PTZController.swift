@@ -94,6 +94,16 @@ final class PTZController {
     @discardableResult
     func press(_ direction: PTZDirection) -> UUID? { begin(direction, repeats: true) }
 
+    /// Owned by the visible live view's task. Cancellation stops readiness reads;
+    /// movement and compensating Stop retain their separate safety lifecycle.
+    func keepConnectionReady() async {
+        guard enabled else { return }
+        while !Task.isCancelled {
+            if !isMoving && !isStopping && !isBlocked { await transport.prepare() }
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+        }
+    }
+
     func release(token: UUID) {
         guard desired?.token == token else { return }
         stop()

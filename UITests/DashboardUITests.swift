@@ -4,6 +4,35 @@ final class DashboardUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
+    func testVideoWallLayoutsRemainProportionalAndUnlabelled() throws {
+        for count in [4, 8, 16] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-testing", "--ui-test-wall", "--ui-test-dark",
+                                   "-AppleLanguages", "(en)", "-AppleLocale", "en"]
+            app.launchEnvironment["LUMA_UI_DASHBOARD_COUNT"] = String(count)
+            app.launch()
+            app.tabBars.buttons["Dashboard"].tap()
+            let card = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.card.")).firstMatch
+            XCTAssertTrue(card.waitForExistence(timeout: 8))
+            card.tap()
+            let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.camera."))
+            waitFor(NSPredicate(format: "count == %d", count), on: tiles)
+            let frames = tiles.allElementsBoundByIndex.map(\.frame)
+            for frame in frames {
+                XCTAssertGreaterThan(frame.width, 50)
+                XCTAssertEqual(frame.width / frame.height, 16.0 / 9.0, accuracy: 0.04)
+            }
+            let columns = count == 16 ? 4 : 2
+            XCTAssertEqual(frames[columns - 1].maxX - frames[0].minX, app.frame.width - 16, accuracy: 2)
+            XCTAssertFalse(app.staticTexts["View 01"].exists)
+            XCTAssertFalse(app.staticTexts["Live · Muted"].exists)
+            XCTAssertFalse(app.tabBars.firstMatch.isHittable)
+            capture("en-dashboard-wall-\(count)-offline-layout")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCreateEditReorderAndRemoveDashboard() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-test-dark", "-AppleLanguages", "(en)", "-AppleLocale", "en"]
@@ -79,6 +108,23 @@ final class DashboardUITests: XCTestCase {
         let renamed = app.descendants(matching: .any).matching(identifier: "dashboard.card.\(dashboardID)").firstMatch
         XCTAssertTrue(renamed.waitForExistence(timeout: 5))
         XCTAssertEqual(renamed.label, "Courtyard")
+
+        renamed.tap()
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "dashboard.camera."))
+        XCTAssertTrue(tiles.firstMatch.waitForExistence(timeout: 8))
+        XCTAssertEqual(tiles.count, 2)
+        for tile in tiles.allElementsBoundByIndex {
+            XCTAssertGreaterThan(tile.frame.width, 50)
+            XCTAssertEqual(tile.frame.width / tile.frame.height, 16.0 / 9.0, accuracy: 0.04)
+        }
+        XCTAssertFalse(app.staticTexts["Entry"].exists)
+        XCTAssertFalse(app.staticTexts["Garden"].exists)
+        XCTAssertFalse(app.staticTexts["Live · Muted"].exists)
+        XCTAssertFalse(app.staticTexts["Fluent streams, sound off. Every view keeps its original proportions."].exists)
+        XCTAssertFalse(app.tabBars.firstMatch.isHittable)
+        capture("en-dashboard-video-wall")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(renamed.waitForExistence(timeout: 5))
 
         app.buttons["dashboard.menu.\(dashboardID)"].tap()
         app.buttons["Remove dashboard"].tap()
@@ -162,7 +208,7 @@ final class DashboardUITests: XCTestCase {
     }
 
     @MainActor
-    private func waitFor(_ predicate: NSPredicate, on element: XCUIElement) {
+    private func waitFor(_ predicate: NSPredicate, on element: Any) {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed)
     }

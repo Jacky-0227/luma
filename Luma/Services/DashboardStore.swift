@@ -64,7 +64,17 @@ final class DashboardStore {
     private func load() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
             do {
-                try persist([DashboardConfiguration(name: String(localized: "All cameras"), includesAllCameras: true)])
+                var initial = DashboardConfiguration(name: String(localized: "All cameras"), includesAllCameras: true)
+                #if DEBUG
+                let arguments = ProcessInfo.processInfo.arguments
+                if arguments.contains("--ui-testing"), arguments.contains("--ui-test-wall"),
+                   let count = Int(ProcessInfo.processInfo.environment["LUMA_UI_DASHBOARD_COUNT"] ?? ""),
+                   [4, 8, 16].contains(count) {
+                    initial.pageSize = count
+                    initial.columns = count == 16 ? 4 : 2
+                }
+                #endif
+                try persist([initial])
             } catch {
                 errorMessage = error.localizedDescription
             }

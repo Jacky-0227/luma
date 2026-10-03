@@ -140,6 +140,11 @@ private struct LiveCameraView: View {
         .toolbar(fullscreen ? .hidden : .visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(fullscreen)
+        .task(id: ControlReadinessID(controller: ptz.map(ObjectIdentifier.init),
+                                    active: isVisible && scenePhase == .active)) {
+            guard isVisible, scenePhase == .active, let ptz else { return }
+            await ptz.keepConnectionReady()
+        }
         .sheet(isPresented: $showingPTZ) {
             if let ptz {
                 NavigationStack {
@@ -180,6 +185,11 @@ private struct LiveCameraView: View {
                 UIApplication.shared.isIdleTimerDisabled = scenePhase == .active && state == .playing
             }
         }
+    }
+
+    private struct ControlReadinessID: Equatable {
+        let controller: ObjectIdentifier?
+        let active: Bool
     }
 
     @ViewBuilder

@@ -8,6 +8,68 @@ import XCTest
 /// A URLProtocol replacement cannot establish connection or Digest-cache reuse.
 final class PTZHTTPIntegrationTests: XCTestCase {
     @MainActor
+    func testReadinessAuthenticatesWithoutMovementAndFirstPressReusesConnection() async throws {
+        try await exercise { fixture in
+            let service = try fixture.service()
+            await service.prepare()
+            XCTAssertEqual(fixture.statusReads, 1)
+            XCTAssertTrue(fixture.accepted.isEmpty, "Readiness must not move or stop a camera.")
+            let challenges = fixture.challengeCount
+            let started = ContinuousClock.now
+            try await service.send(PTZCommand(direction: .left, mode: .continuous))
+            let elapsed = started.duration(to: .now)
+            fixture.mark("prepared first press response: \(elapsed)")
+            XCTAssertLessThan(elapsed, .milliseconds(500))
+            XCTAssertEqual(fixture.challengeCount, challenges,
+                           "The first movement must reuse the GET's authenticated protection space.")
+            XCTAssertEqual(fixture.accepted.first?.peerID, fixture.lastStatusPeer)
+            try await service.send(.stop)
+        }
+    }
+
+    @MainActor
+    func testStalledReadinessCannotDelayMovementOrIndependentStop() async throws {
+        try await exercise { fixture in
+            let service = try fixture.service()
+            fixture.holdStatusReply = true
+            let readiness = Task { await service.prepare() }
+            defer { readiness.cancel() }
+            try await fixture.wait("Readiness did not reach its read-only status endpoint.") { fixture.statusReads == 1 }
+            fixture.holdNextMoveReply = true
+            let movement = Task { try await service.send(PTZCommand(direction: .right, mode: .continuous)) }
+            defer { fixture.releaseMoveReply(); movement.cancel() }
+            try await fixture.wait("A stalled readiness GET delayed movement.", timeout: .milliseconds(500)) {
+                fixture.heldMove != nil
+            }
+            let released = ContinuousClock.now
+            try await service.send(.stop)
+            let elapsed = released.duration(to: .now)
+            fixture.mark("Stop during held GET and Move: \(elapsed)")
+            XCTAssertLessThan(elapsed, .milliseconds(500))
+            XCTAssertEqual(fixture.stopCount, 1)
+            XCTAssertEqual(fixture.moveReplies, 0)
+            fixture.releaseMoveReply()
+            try await movement.value
+            // Keep the independent request-order safety contract in the test too.
+            try await service.send(.stop)
+            await readiness.value
+        }
+    }
+
+    @MainActor
+    func testUnsupportedReadinessDoesNotDisableWorkingControls() async throws {
+        try await exercise { fixture in
+            fixture.statusIsUnsupported = true
+            let service = try fixture.service()
+            await service.prepare()
+            XCTAssertTrue(fixture.accepted.isEmpty)
+            try await service.send(PTZCommand(direction: .zoomIn, mode: .continuous))
+            try await service.send(.stop)
+            XCTAssertEqual(fixture.accepted.map(\.isStop), [false, true])
+        }
+    }
+
+    @MainActor
     func testDigestAndKeepAliveAreReusedAcrossMovesAndStops() async throws {
         try await exercise { fixture in
             let service = try fixture.service()
@@ -137,6 +199,10 @@ private final class PTZHTTPFixture {
     private(set) var rejectedCredentials = 0
     private(set) var moveReplies = 0
     private(set) var heldMove: UUID?
+    private(set) var statusReads = 0
+    private(set) var lastStatusPeer: UUID?
+    var holdStatusReply = false
+    var statusIsUnsupported = false
     var holdNextMoveReply = false
     var stopCount: Int { accepted.filter(\.isStop).count }
 
@@ -249,7 +315,8 @@ private final class PTZHTTPFixture {
     }
 
     private func handle(method: String, target: String, headers: [String: String], body: Data, peer: Peer) {
-        guard method == "PUT", target == "/ISAPI/PTZCtrl/channels/1/continuous" else {
+        let isStatus = method == "GET" && target == "/ISAPI/PTZCtrl/channels/1/status"
+        guard isStatus || (method == "PUT" && target == "/ISAPI/PTZCtrl/channels/1/continuous") else {
             reply(peer, status: "404 Not Found")
             return
         }
@@ -260,6 +327,16 @@ private final class PTZHTTPFixture {
             reply(peer, status: "401 Unauthorized", extraHeaders: [
                 "WWW-Authenticate": "Digest realm=\"\(realm)\", nonce=\"\(nonce)\", algorithm=MD5, qop=\"auth\""
             ])
+            return
+        }
+        if isStatus {
+            statusReads += 1
+            lastStatusPeer = peer.id
+            mark("authenticated read-only status received")
+            if !holdStatusReply {
+                reply(peer, status: statusIsUnsupported ? "404 Not Found" : "200 OK",
+                      body: Data("<PTZStatus/>".utf8))
+            }
             return
         }
         let xml = String(decoding: body, as: UTF8.self)

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 enum PTZDirection: CaseIterable, Equatable, Sendable {
     case up, down, left, right, upLeft, upRight, downLeft, downRight, zoomIn, zoomOut
@@ -83,9 +84,23 @@ struct PTZEndpoint: Sendable {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData,
                                  timeoutInterval: PTZRequestPolicy.timeout(for: command))
         request.httpMethod = "PUT"
+        request.networkServiceType = .responsiveData
         request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
         request.httpBody = command.xml(for: apiFamily)
+        return request
+    }
+
+    func statusRequest() throws -> URLRequest {
+        let address = host.contains(":") ? "[\(host)]" : host
+        let prefix = apiFamily == .legacy ? "" : "/ISAPI"
+        guard let url = URL(string: "\(scheme)://\(address):\(port)\(prefix)/PTZCtrl/channels/\(channel)/status") else {
+            throw PTZError.invalidSettings
+        }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 1)
+        request.httpMethod = "GET"
+        request.networkServiceType = .responsiveData
+        request.setValue("application/xml", forHTTPHeaderField: "Accept")
         return request
     }
 
@@ -120,6 +135,11 @@ enum PTZRequestPolicy {
 @MainActor
 protocol PTZTransport {
     func send(_ command: PTZCommand) async throws
+    func prepare() async
+}
+
+extension PTZTransport {
+    func prepare() async {}
 }
 
 @MainActor
@@ -128,6 +148,9 @@ final class PTZService: PTZTransport {
     private let password: String
     private let apiFamily: PTZAPIFamily
     private var session: URLSession?
+    private var preparation: (id: UUID, task: Task<Void, Never>)?
+    private var activeCommands = 0
+    private static let performanceLog = Logger(subsystem: "app.luma.viewer", category: "PTZ")
 
     init(configuration: CameraConfiguration, password: String, apiFamily: PTZAPIFamily = .isapi) {
         self.configuration = configuration
@@ -136,22 +159,60 @@ final class PTZService: PTZTransport {
     }
 
     deinit {
+        preparation?.task.cancel()
         session?.finishTasksAndInvalidate()
+    }
+
+    private func connection(for endpoint: PTZEndpoint) -> URLSession {
+        if let session { return session }
+        let settings = PTZRequestPolicy.sessionConfiguration(for: .stop)
+        let authentication = PTZAuthenticationDelegate(endpoint: endpoint, username: configuration.username, password: password)
+        let next = URLSession(configuration: settings, delegate: authentication, delegateQueue: nil)
+        session = next
+        return next
+    }
+
+    /// A read-only status query establishes Digest authentication and keep-alive
+    /// before touch-down. It never sends movement/Stop and never gates controls.
+    /// Unsupported status endpoints do not override discovery's capability result.
+    func prepare() async {
+        guard activeCommands == 0, preparation == nil, !Task.isCancelled,
+              let endpoint = try? PTZEndpoint(configuration: configuration, apiFamily: apiFamily),
+              let request = try? endpoint.statusRequest() else { return }
+        let session = connection(for: endpoint)
+        let id = UUID()
+        let task = Task { @MainActor in
+            do { _ = try await session.data(for: request) }
+            catch { /* Optional readiness, never a reason to disable working controls. */ }
+        }
+        preparation = (id, task)
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        if preparation?.id == id { preparation = nil }
     }
 
     func send(_ command: PTZCommand) async throws {
         let endpoint: PTZEndpoint
         do { endpoint = try PTZEndpoint(configuration: configuration, apiFamily: apiFamily) }
         catch { throw PTZError.invalidSettings }
-        if session == nil {
-            let settings = PTZRequestPolicy.sessionConfiguration(for: command)
-            let authentication = PTZAuthenticationDelegate(endpoint: endpoint, username: configuration.username, password: password)
-            session = URLSession(configuration: settings, delegate: authentication, delegateQueue: nil)
-        }
-        guard let session else { throw PTZError.connectionFailed }
+        // A stalled status GET must never occupy a lane needed by touch-down or Stop.
+        preparation?.task.cancel()
+        preparation = nil
+        activeCommands += 1
+        defer { activeCommands -= 1 }
+        let session = connection(for: endpoint)
+        let started = ContinuousClock.now
+        let phase = command.isStop ? "stop" : "move"
         do {
             let (data, response) = try await session.data(for: endpoint.request(for: command))
             guard let response = response as? HTTPURLResponse else { throw PTZError.invalidResponse }
+            let elapsed = started.duration(to: .now).components
+            let milliseconds = elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000
+            // Only phase/status/duration; never addresses, credentials or device XML.
+            Self.performanceLog.notice("phase=\(phase, privacy: .public) http=\(response.statusCode) elapsed_ms=\(milliseconds)")
             try PTZResponse.validate(statusCode: response.statusCode, body: data)
         } catch let error as PTZError {
             throw error
