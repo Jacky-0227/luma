@@ -115,10 +115,15 @@ final class MediaLibrary {
 
         let fileExtension = fileURL.pathExtension.lowercased()
         if destination.kind == .snapshot {
+            // Validate the container and dimensions without decoding every
+            // pixel of a 4K frame on the main thread.
             guard fileExtension == "png",
                   let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
                   CGImageSourceGetCount(source) > 0,
-                  CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
+                  CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  (properties[kCGImagePropertyPixelWidth] as? Int ?? 0) > 0,
+                  (properties[kCGImagePropertyPixelHeight] as? Int ?? 0) > 0
             else { throw MediaLibraryError.invalidCapture }
         } else {
             guard Self.recordingExtensions.contains(fileExtension) else { throw MediaLibraryError.invalidCapture }

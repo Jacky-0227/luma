@@ -49,15 +49,33 @@ final class CameraPlayer {
     @ObservationIgnored private var sessionStartedAt = ContinuousClock.now
     @ObservationIgnored private var firstFrameLogged = false
     @ObservationIgnored private var hasStartedPlayback = false
-    @ObservationIgnored private var stopWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var stopWaiters: [UUID: CheckedContinuation<StopResult, Never>] = [:]
+    @ObservationIgnored private var playingSince: ContinuousClock.Instant?
+    @ObservationIgnored private let keepsRetrying: Bool
 
+    enum StopResult: Sendable {
+        case stopped
+        /// The native input has not finished closing within the timeout. The
+        /// player still owns it and keeps closing; no new decoder is opened here.
+        case stillClosing
+    }
+
+    /// Stable playback for this long restores the automatic reconnection budget.
+    static let stablePlaybackReset: Duration = .seconds(60)
+    /// After the budget is spent, an unattended wall keeps trying at this pace.
+    static let slowRetryInterval: Duration = .seconds(60)
+
+    /// - Parameter keepsRetrying: Unattended views (the dashboard wall) retry at
+    ///   a slow pace after the fast budget is spent instead of failing for good.
     init(configuration: CameraConfiguration, password: String, savesPreview: Bool = false,
-         thumbnailStore: CameraThumbnailStore? = nil, playbackProfile: PlaybackProfile = .interactive) {
+         thumbnailStore: CameraThumbnailStore? = nil, playbackProfile: PlaybackProfile = .interactive,
+         keepsRetrying: Bool = false) {
         self.configuration = configuration
         self.password = password
         self.playbackProfile = playbackProfile
         self.savesPreview = savesPreview
         self.thumbnailStore = thumbnailStore
+        self.keepsRetrying = keepsRetrying
         self.quality = configuration.defaultQuality
     }
 
@@ -119,12 +137,20 @@ final class CameraPlayer {
     }
 
     /// Dashboard transitions can stop every stream first, then await each
-    /// decoder/capture teardown before creating a new set of players.
-    func stopAndWait() async {
+    /// decoder/capture teardown before creating a new set of players. The wait
+    /// is bounded so one slow camera cannot hold the interface indefinitely.
+    @discardableResult
+    func stopAndWait(timeout: Duration = .seconds(30)) async -> StopResult {
         stop()
-        guard isRetiring else { return }
-        await withCheckedContinuation { continuation in
-            stopWaiters.append(continuation)
+        guard isRetiring else { return .stopped }
+        let id = UUID()
+        let timer = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: timeout) } catch { return }
+            self?.stopWaiters.removeValue(forKey: id)?.resume(returning: .stillClosing)
+        }
+        defer { timer.cancel() }
+        return await withCheckedContinuation { continuation in
+            stopWaiters[id] = continuation
         }
     }
 
@@ -225,6 +251,7 @@ final class CameraPlayer {
         sessionStartedAt = .now
         firstFrameLogged = false
         hasStartedPlayback = false
+        playingSince = nil
         nextSession.start(on: surface, muted: isMuted, aspectFill: aspectFill)
         armWatchdog(for: id)
     }
@@ -243,8 +270,13 @@ final class CameraPlayer {
         case .videoPlaying:
             lastPlaybackActivity = .now
             hasStartedPlayback = true
+            if let playingSince, playingSince.duration(to: .now) >= Self.stablePlaybackReset {
+                // A long healthy stream is a new episode, not part of a loop.
+                reconnectAttempt = 0
+            }
             if state != .playing {
                 state = .playing
+                playingSince = .now
                 session.setMuted(isMuted)
                 if let surface {
                     session.setAspectFill(aspectFill, bounds: surface.bounds)
@@ -350,24 +382,30 @@ final class CameraPlayer {
 
     private func recoverOrFail(_ message: String) {
         cancelScheduledWork()
-        // Three automatic retries per explicit play/retry action. A briefly
-        // successful stream does not reset this budget and create an endless loop.
-        guard reconnectAttempt < 3 else {
+        playingSince = nil
+        // Three fast automatic retries. A briefly successful stream does not
+        // reset this budget (no endless loop); only stable playback does.
+        let delay: Duration
+        if reconnectAttempt < 3 {
+            delay = .seconds(1 << reconnectAttempt) // 1, 2, 4 seconds
+            reconnectAttempt += 1
+            state = .connecting
+        } else if keepsRetrying {
+            delay = Self.slowRetryInterval
+            state = .failed(message)
+        } else {
             wantsPlayback = false
             state = .failed(message)
             retireCurrentSession()
             return
         }
 
-        let delay = 1 << reconnectAttempt // 1, 2, 4 seconds
-        reconnectAttempt += 1
         retryReady = false
-        state = .connecting
         retireCurrentSession()
         retryTask = Task { @MainActor [weak self] in
             guard self?.wantsPlayback == true else { return }
             do {
-                try await Task.sleep(for: .seconds(delay))
+                try await Task.sleep(for: delay)
             } catch {
                 return
             }
@@ -394,8 +432,8 @@ final class CameraPlayer {
             self.wantsPlayback = false
             self.cancelScheduledWork()
             self.state = .failed(Self.closingMessage)
-            // Do not resume stopAndWait or create another decoder here.
-            // The native input and its view remain owned until actual stop.
+            // Do not create another decoder here. The native input and its
+            // view remain owned until actual stop; waiters time out on their own.
         }
         retiringSession.retire { [weak self] in
             guard let self else { return }
@@ -404,8 +442,8 @@ final class CameraPlayer {
             self.retirementTimedOut = false
             self.isRetiring = false
             let waiters = self.stopWaiters
-            self.stopWaiters = []
-            for waiter in waiters { waiter.resume() }
+            self.stopWaiters = [:]
+            for waiter in waiters.values { waiter.resume(returning: .stopped) }
             self.beginIfReady()
         }
     }

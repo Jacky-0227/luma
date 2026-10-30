@@ -46,8 +46,8 @@ struct PTZControlsView: View {
                     .accessibilityIdentifier("ptz.error")
             }
             Text(controller.usesContinuousControl
-                 ? String(localized: "A stop command is sent when you release or after two seconds. Keep the camera connected until it stops.")
-                 : String(localized: "Each hold stops after two seconds. Press again to continue."))
+                 ? String(localized: "A stop command is sent when you release. Keep the camera connected until it stops.")
+                 : String(localized: "The camera keeps moving while you hold and stops shortly after you release."))
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .contain)

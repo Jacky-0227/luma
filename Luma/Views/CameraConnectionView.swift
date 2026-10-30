@@ -172,20 +172,42 @@ private struct LiveCameraView: View {
             UIApplication.shared.isIdleTimerDisabled = false
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && isVisible {
+            switch phase {
+            case .active where isVisible:
                 player.play()
                 UIApplication.shared.isIdleTimerDisabled = true
-            } else {
+            case .background:
                 ptz?.stop()
                 player.stop()
                 if isVisible { UIApplication.shared.isIdleTimerDisabled = false }
+            default:
+                // Control Center, banners and the app switcher only make the
+                // scene inactive. Keep video and any recording; stop movement,
+                // since the finger may no longer be on the control.
+                ptz?.stop()
             }
+        }
+        .onChange(of: player.captureMessage) { _, message in announce(message) }
+        .onChange(of: player.captureError) { _, error in announce(error) }
+        .onChange(of: ptz?.errorMessage) { _, error in announce(error) }
+        .onChange(of: player.state) { _, state in
+            if case .failed(let message) = state { announce(message) }
+        }
+        .accessibilityAction(.escape) {
+            guard fullscreen else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { fullscreen = false }
         }
         .onChange(of: player.state) { _, state in
             if isVisible {
                 UIApplication.shared.isIdleTimerDisabled = scenePhase == .active && state == .playing
             }
         }
+    }
+
+    /// Results appear outside the VoiceOver cursor; speak them when they change.
+    private func announce(_ text: String?) {
+        guard let text, !text.isEmpty else { return }
+        AccessibilityNotification.Announcement(text).post()
     }
 
     private struct ControlReadinessID: Equatable {
@@ -285,6 +307,9 @@ private struct LiveCameraView: View {
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
                 .tint(.white)
+                // Fixed-size tool buttons: long-press shows their labels at
+                // accessibility text sizes.
+                .accessibilityShowsLargeContentViewer()
             }
             .padding(14)
         }

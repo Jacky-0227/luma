@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct CameraEditorView: View {
@@ -111,7 +112,13 @@ struct CameraEditorView: View {
                 } header: {
                     Text("PTZ CAMERA")
                 } footer: {
-                    Text("Luma checks PTZ capabilities when you open live view. Detection does not move the camera. The control port is separate from the RTSP port.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Luma checks PTZ capabilities when you open live view. Detection does not move the camera. The control port is separate from the RTSP port.")
+                        if !controlUseHTTPS && Self.httpNeedsLocalName(host) {
+                            Label("iOS only allows plain HTTP to IP addresses, single-word names and .local names. Use one of those, or HTTPS, for controls and previews.", systemImage: "exclamationmark.triangle")
+                                .accessibilityIdentifier("camera.ptz.atsWarning")
+                        }
+                    }
                 }
                 Section {
                     LabeledContent("RTSP port") {
@@ -158,6 +165,18 @@ struct CameraEditorView: View {
                 } catch { message = InterfaceMessage(text: error.localizedDescription) }
             }
         }
+    }
+
+    /// App Transport Security's local-networking exception covers IP
+    /// literals, unqualified names and .local only. Other dotted names (for
+    /// example cam.lan or nvr.home.arpa) need HTTPS for URLSession requests.
+    static func httpNeedsLocalName(_ rawHost: String) -> Bool {
+        let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]."))
+        guard host.contains("."), !host.hasSuffix(".local") else { return false }
+        var ipv4 = in_addr()
+        var ipv6 = in6_addr()
+        return inet_pton(AF_INET, host, &ipv4) != 1 && inet_pton(AF_INET6, host, &ipv6) != 1
     }
 
     private func save() {

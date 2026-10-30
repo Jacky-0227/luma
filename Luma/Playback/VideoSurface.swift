@@ -34,8 +34,9 @@ struct VideoSurface: UIViewRepresentable {
                 player?.surfaceDidLayout(view)
             }
         }
+        // Layout changes arrive through layoutSubviews. Re-sending geometry on
+        // every SwiftUI update would queue SDK work for each tile on the wall.
         player.attach(to: view)
-        player.surfaceDidLayout(view)
     }
 
     static func dismantleUIView(_ view: CameraVideoView, coordinator: Coordinator) {

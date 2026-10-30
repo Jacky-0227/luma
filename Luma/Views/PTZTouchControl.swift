@@ -14,9 +14,11 @@ final class PTZTouchControl: UIButton {
     override init(frame: CGRect) {
         super.init(frame: frame)
         addTarget(self, action: #selector(press), for: .touchDown)
+        // Sliding well off the button also stops: holds have no time limit.
         addTarget(self, action: #selector(releaseHold),
                   for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
         isAccessibilityElement = true
+        // No large content viewer: its long-press would cancel the hold.
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

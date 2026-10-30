@@ -28,7 +28,9 @@ final class PTZController {
     @ObservationIgnored private let enabled: Bool
     @ObservationIgnored private let transport: any PTZTransport
     @ObservationIgnored private let capabilities: PTZCapabilities
-    @ObservationIgnored private let holdLimit: Duration
+    /// nil: a hold moves for as long as the finger stays down. Release, leaving
+    /// the view, and backgrounding still send Stop.
+    @ObservationIgnored private let holdLimit: Duration?
     @ObservationIgnored private let stopRetryDelay: Duration
     @ObservationIgnored private var desired: Intent?
     @ObservationIgnored private var issuedMoveRevision = 0
@@ -56,13 +58,13 @@ final class PTZController {
                   supportsPanTilt: supportsPanTilt, supportsZoom: supportsZoom)
     }
 
-    convenience init(enabled: Bool, transport: any PTZTransport, holdLimit: Duration = .seconds(2), supportsPanTilt: Bool = true, supportsZoom: Bool = true) {
+    convenience init(enabled: Bool, transport: any PTZTransport, holdLimit: Duration? = nil, supportsPanTilt: Bool = true, supportsZoom: Bool = true) {
         self.init(enabled: enabled, transport: transport,
                   capabilities: PTZCapabilities(channel: 1, panTilt: supportsPanTilt, zoom: supportsZoom), holdLimit: holdLimit)
     }
 
     init(enabled: Bool, transport: any PTZTransport, capabilities: PTZCapabilities,
-         holdLimit: Duration = .seconds(2), stopRetryDelay: Duration = .milliseconds(150)) {
+         holdLimit: Duration? = nil, stopRetryDelay: Duration = .milliseconds(150)) {
         self.enabled = enabled
         self.transport = transport
         self.capabilities = capabilities
@@ -137,10 +139,14 @@ final class PTZController {
             sendDesiredMove()
         }
 
-        let limit: Duration = repeats ? holdLimit : .milliseconds(PTZCommand.durationMilliseconds)
-        deadline = Task { @MainActor [self] in
-            do { try await Task.sleep(for: limit) } catch { return }
-            release(token: intent.token)
+        // A VoiceOver nudge has no release gesture, so it always gets a deadline.
+        // A touch hold moves until release unless a limit was configured.
+        let nudgeLimit: Duration = .milliseconds(PTZCommand.durationMilliseconds)
+        if let limit = repeats ? holdLimit : nudgeLimit {
+            deadline = Task { @MainActor [self] in
+                do { try await Task.sleep(for: limit) } catch { return }
+                release(token: intent.token)
+            }
         }
         return intent.token
     }
@@ -272,15 +278,21 @@ final class PTZController {
 
     private func beginBackgroundAllowance() {
         guard backgroundTask == .invalid else { return }
+        // The expiration handler runs on the main thread and must end the task
+        // before returning; otherwise iOS terminates the app.
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PTZ stop") { [weak self] in
-            Task { @MainActor [weak self] in
+            MainActor.assumeIsolated {
                 self?.stop()
                 self?.endBackgroundAllowance()
             }
         }
         backgroundDeadline?.cancel()
         backgroundDeadline = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(12)) } catch { return }
+            // A foreground hold may last indefinitely. The 12-second bound only
+            // applies once the app is no longer active.
+            repeat {
+                do { try await Task.sleep(for: .seconds(12)) } catch { return }
+            } while UIApplication.shared.applicationState == .active && self?.desired != nil
             self?.stop()
             self?.endBackgroundAllowance()
         }

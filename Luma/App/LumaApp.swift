@@ -3,6 +3,9 @@ import SwiftUI
 @main
 struct LumaApp: App {
     @State private var store = LumaApp.makeStore()
+    // Created once here; a view's @State initializer would reload it from
+    // disk every time the tab view is rebuilt.
+    @State private var dashboards = DashboardStore()
     @AppStorage("luma.welcomeCompleted") private var hasCompletedWelcome = false
 
     var body: some Scene {
@@ -11,7 +14,7 @@ struct LumaApp: App {
                 if hasCompletedWelcome || hasExistingData || skipsWelcomeForTests {
                     TabView {
                         Tab("Cameras", systemImage: "video") { HomeView(store: store) }
-                        Tab("Dashboard", systemImage: "square.grid.2x2") { DashboardView(store: store) }
+                        Tab("Dashboard", systemImage: "square.grid.2x2") { DashboardView(store: store, dashboards: dashboards) }
                         Tab("Library", systemImage: "photo.on.rectangle") { MediaLibraryView(library: .shared) }
                     }
                 } else {

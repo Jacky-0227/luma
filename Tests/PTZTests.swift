@@ -201,6 +201,22 @@ final class PTZTests: XCTestCase {
     }
 
     @MainActor
+    func testDefaultHoldKeepsMovingUntilRelease() async throws {
+        let transport = RecordingPTZTransport()
+        let controller = PTZController(enabled: true, transport: transport, capabilities: Self.continuousCapabilities)
+        let token = try XCTUnwrap(controller.press(.left))
+        await transport.waitForCount(1)
+        // Longer than the former two-second hold limit.
+        try await Task.sleep(for: .milliseconds(2_300))
+        XCTAssertEqual(transport.commands, [PTZCommand(direction: .left, mode: .continuous)])
+        XCTAssertTrue(controller.isMoving)
+        controller.release(token: token)
+        await transport.waitForCount(2)
+        XCTAssertEqual(transport.commands.last, .stop)
+        try await waitUntil { !controller.isMoving && !controller.isStopping }
+    }
+
+    @MainActor
     func testFailureStillAttemptsStopWithoutExposingRawErrors() async throws {
         let transport = RecordingPTZTransport(failFirstMove: true)
         let controller = PTZController(enabled: true, transport: transport)

@@ -119,7 +119,7 @@
 "Pan, tilt & zoom" = "云台与变焦";
 "Hold a direction to move. Release to stop." = "按住方向键移动，松开即可停止。";
 "Stop movement" = "停止移动";
-"Each hold stops after two seconds. Press again to continue." = "每次按住最多移动两秒，松开后再次按住即可继续。";
+"The camera keeps moving while you hold and stops shortly after you release." = "按住多久就移动多久，松手后很快停止。";
 "Activate to move a short distance." = "激活后短距离移动。";
 "Move up left" = "向左上移动";
 "Move up" = "向上移动";
@@ -204,7 +204,7 @@
 "The device reports that PTZ controls are disabled or unavailable on this channel." = "设备报告此通道的云台控制已禁用或不可用。";
 "PTZ was detected, but this device's movement method is not supported yet." = "已检测到云台，但暂不支持此设备的移动方式。";
 "Detect controls again" = "重新检测云台";
-"A stop command is sent when you release or after two seconds. Keep the camera connected until it stops." = "松手或按住两秒后会发送停止指令。请保持连接，直到摄像头停止。";
+"A stop command is sent when you release. Keep the camera connected until it stops." = "松手后会发送停止指令。请保持连接，直到摄像头停止。";
 "The camera has not confirmed stopping. Tap Stop to retry before moving again." = "摄像头尚未确认停止。请先点按停止重试，再继续移动。";
 "This device or channel does not support this ISAPI PTZ command." = "此设备或通道不支持这项 ISAPI 云台指令。";
 "The camera rejected this PTZ command. Check PTZ support, the control channel, and account permissions." = "摄像头拒绝了云台指令。请检查云台支持情况、控制通道及账号权限。";
@@ -262,3 +262,11 @@
 "PTZ access was denied. Check the device username, password, and PTZ permissions; live view can continue." = "设备拒绝了云台访问。请检查设备用户名、密码和云台权限；实时画面可继续播放。";
 "Reset digital zoom" = "恢复原始画面";
 "Pinch to zoom, then drag to look around." = "双指缩放，放大后拖动查看。";
+"Hide camera names" = "隐藏摄像头名称";
+"Show camera names" = "显示摄像头名称";
+"%lld of %lld live" = "%lld / %lld 路在线";
+"Some cameras are still closing. They will reconnect shortly." = "部分画面仍在关闭，稍后会自动重新连接。";
+"Password needed" = "需要密码";
+"Offline · retrying" = "离线 · 正在重试";
+"1 camera added." = "已添加 1 台摄像头。";
+"iOS only allows plain HTTP to IP addresses, single-word names and .local names. Use one of those, or HTTPS, for controls and previews." = "iOS 只允许对 IP 地址、不带点的名称和 .local 名称使用普通 HTTP。云台和预览请改用这类地址，或开启 HTTPS。";

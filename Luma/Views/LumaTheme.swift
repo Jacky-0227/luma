@@ -31,10 +31,9 @@ struct GlassPanel: ViewModifier {
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: radius))
-        } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: radius))
         } else {
-            content.background(.regularMaterial, in: .rect(cornerRadius: radius))
+            // The deployment target is iOS 26; Liquid Glass is always available.
+            content.glassEffect(.regular, in: .rect(cornerRadius: radius))
         }
     }
 }

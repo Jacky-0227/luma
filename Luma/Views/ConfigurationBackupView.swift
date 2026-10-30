@@ -43,7 +43,8 @@ struct ConfigurationBackupView: View {
             }
             if let importedCount {
                 Section {
-                    Text(String(format: String(localized: "%lld cameras added."), Int64(importedCount)))
+                    Text(importedCount == 1 ? String(localized: "1 camera added.")
+                         : String(format: String(localized: "%lld cameras added."), Int64(importedCount)))
                 }
             }
         }
@@ -53,17 +54,27 @@ struct ConfigurationBackupView: View {
             if case .failure = result { message = InterfaceMessage(text: String(localized: "The backup could not be exported. Try another location.")) }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
-            do {
-                let url = try result.get()
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                guard size <= 2_000_000 else { throw ConfigurationBackupError.invalidFile }
-                importedCount = try store.importConfiguration(Data(contentsOf: url))
-            } catch {
-                message = InterfaceMessage(text: String(localized: "The backup could not be imported. Choose a valid Luma configuration file under 2 MB."))
+            Task { @MainActor in
+                do {
+                    let url = try result.get()
+                    // A file not yet downloaded from iCloud can block; read it off the main thread.
+                    let data = try await Task.detached(priority: .userInitiated) { try Self.readBackup(at: url) }.value
+                    importedCount = try store.importConfiguration(data)
+                } catch {
+                    message = InterfaceMessage(text: String(localized: "The backup could not be imported. Choose a valid Luma configuration file under 2 MB."))
+                }
             }
         }
         .lumaAlert($message)
+    }
+
+    private nonisolated static func readBackup(at url: URL) throws -> Data {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= 2_000_000 else { throw ConfigurationBackupError.invalidFile }
+        let data = try Data(contentsOf: url)
+        guard data.count <= 2_000_000 else { throw ConfigurationBackupError.invalidFile }
+        return data
     }
 }

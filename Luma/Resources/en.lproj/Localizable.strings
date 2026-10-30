@@ -121,7 +121,7 @@
 "Pan, tilt & zoom" = "Pan, tilt & zoom";
 "Hold a direction to move. Release to stop." = "Hold a direction to move. Release to stop.";
 "Stop movement" = "Stop movement";
-"Each hold stops after two seconds. Press again to continue." = "Each hold stops after two seconds. Press again to continue.";
+"The camera keeps moving while you hold and stops shortly after you release." = "The camera keeps moving while you hold and stops shortly after you release.";
 "Activate to move a short distance." = "Activate to move a short distance.";
 "Move up left" = "Move up left";
 "Move up" = "Move up";
@@ -206,7 +206,7 @@
 "The device reports that PTZ controls are disabled or unavailable on this channel." = "The device reports that PTZ controls are disabled or unavailable on this channel.";
 "PTZ was detected, but this device's movement method is not supported yet." = "PTZ was detected, but this device's movement method is not supported yet.";
 "Detect controls again" = "Detect controls again";
-"A stop command is sent when you release or after two seconds. Keep the camera connected until it stops." = "A stop command is sent when you release or after two seconds. Keep the camera connected until it stops.";
+"A stop command is sent when you release. Keep the camera connected until it stops." = "A stop command is sent when you release. Keep the camera connected until it stops.";
 "The camera has not confirmed stopping. Tap Stop to retry before moving again." = "The camera has not confirmed stopping. Tap Stop to retry before moving again.";
 "This device or channel does not support this ISAPI PTZ command." = "This device or channel does not support this ISAPI PTZ command.";
 "The camera rejected this PTZ command. Check PTZ support, the control channel, and account permissions." = "The camera rejected this PTZ command. Check PTZ support, the control channel, and account permissions.";
@@ -262,3 +262,11 @@
 "Fluent streams, sound off. Every view keeps its original proportions." = "Fluent streams, sound off. Every view keeps its original proportions.";
 
 "PTZ access was denied. Check the device username, password, and PTZ permissions; live view can continue." = "PTZ access was denied. Check the device username, password, and PTZ permissions; live view can continue.";
+"Hide camera names" = "Hide camera names";
+"Show camera names" = "Show camera names";
+"%lld of %lld live" = "%lld of %lld live";
+"Some cameras are still closing. They will reconnect shortly." = "Some cameras are still closing. They will reconnect shortly.";
+"Password needed" = "Password needed";
+"Offline · retrying" = "Offline · retrying";
+"1 camera added." = "1 camera added.";
+"iOS only allows plain HTTP to IP addresses, single-word names and .local names. Use one of those, or HTTPS, for controls and previews." = "iOS only allows plain HTTP to IP addresses, single-word names and .local names. Use one of those, or HTTPS, for controls and previews.";

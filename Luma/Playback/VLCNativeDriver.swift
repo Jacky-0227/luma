@@ -12,8 +12,20 @@ private final class VLCVideoAttachment: @unchecked Sendable {
     @MainActor init(_ view: UIView) { self.view = view }
 }
 
+/// Carries a retiring player to the blocking queue for the native stop only.
+/// After `retire` sets the cancellation bit, no other application code issues
+/// commands to it; the SDK queue resumes ownership once stop returns.
+private final class VLCRetiringPlayer: @unchecked Sendable {
+    let player: VLCMediaPlayer
+    init(_ player: VLCMediaPlayer) { self.player = player }
+}
+
 private enum VLCSDKQueue {
     static let queue = DispatchQueue(label: "app.luma.vlc-sdk", qos: .userInitiated)
+    /// Native calls that can block for seconds (input shutdown, route lookup).
+    /// They never touch VLCKit cached properties, so they need not hold the
+    /// shared SDK queue, where they would delay every other camera.
+    static let blocking = DispatchQueue(label: "app.luma.vlc-blocking", qos: .userInitiated, attributes: .concurrent)
 
     // VLCMedia(url:) always uses VLCLibrary.sharedLibrary. Use the same shared
     // library for players instead of allocating another library per connection.
@@ -75,7 +87,9 @@ private enum VLCEventPolicy {
 }
 
 /// Safety invariant: every application access to player/media and all native
-/// commands and SDK cached-property updates occur on `queue`. Delegate
+/// commands and SDK cached-property updates occur on `queue`, except the two
+/// blocking calls on `VLCSDKQueue.blocking`: route lookup (no SDK object) and
+/// the final native stop of a cancelled player (see `retire`). Delegate
 /// callbacks read cached state there and send only values to MainActor. The
 /// cancellation bit alone is shared and protected by Mutex; no queue waits
 /// synchronously for MainActor.
@@ -133,28 +147,42 @@ final class VLCNativeDriver: @unchecked Sendable {
     func start(on view: UIView, muted: Bool, aspectFill: Bool) {
         let attachment = VLCVideoAttachment(view)
         let bounds = view.bounds
-        queue.async { [self] in
-            guard !isCancelled, let player else { return }
-            if let rtspHost, !ownsInterfaceLease {
-                var address: UInt32 = 0
-                guard LumaRTSPLocalIPv4(rtspHost, rtspPort, &address) else {
-                    emit(.routeUnavailable)
-                    return
-                }
-                guard !isCancelled else { return }
-                guard VLCInterfaceLeases.shared.acquire(owner: leaseID, address: address) else {
-                    emit(.routeConflict)
-                    return
-                }
-                ownsInterfaceLease = true
-            }
-            player.drawable = attachment.view
-            player.audio?.isMuted = muted
-            applyAspectFill(aspectFill, bounds: bounds, player: player)
-            guard !isCancelled else { return }
-            player.play()
-            startFirstFrameProbe()
+        guard let rtspHost else {
+            queue.async { [self] in begin(attachment, bounds: bounds, muted: muted, aspectFill: aspectFill, routeAddress: nil) }
+            return
         }
+        // Name resolution can block for seconds on an unreachable host.
+        let port = rtspPort
+        VLCSDKQueue.blocking.async { [self] in
+            guard !isCancelled else { return }
+            var address: UInt32 = 0
+            let resolved = LumaRTSPLocalIPv4(rtspHost, port, &address)
+            queue.async { [self] in
+                guard resolved else {
+                    if !isCancelled { emit(.routeUnavailable) }
+                    return
+                }
+                begin(attachment, bounds: bounds, muted: muted, aspectFill: aspectFill, routeAddress: address)
+            }
+        }
+    }
+
+    private func begin(_ attachment: VLCVideoAttachment, bounds: CGRect, muted: Bool, aspectFill: Bool, routeAddress: UInt32?) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !isCancelled, let player else { return }
+        if let address = routeAddress, !ownsInterfaceLease {
+            guard VLCInterfaceLeases.shared.acquire(owner: leaseID, address: address) else {
+                emit(.routeConflict)
+                return
+            }
+            ownsInterfaceLease = true
+        }
+        player.drawable = attachment.view
+        player.audio?.isMuted = muted
+        applyAspectFill(aspectFill, bounds: bounds, player: player)
+        guard !isCancelled else { return }
+        player.play()
+        startFirstFrameProbe()
     }
 
     func setMuted(_ muted: Bool) {
@@ -239,25 +267,37 @@ final class VLCNativeDriver: @unchecked Sendable {
             }
             player.delegate = nil
             bridge = nil
-            guard LumaStopVLCInput(player) else {
-                // Never claim release succeeded if a future SDK changes the
-                // pinned bridging contract. Retain the player for safety.
-                DispatchQueue.main.async { completion(false) }
-                return
+            // The synchronous stop waits for the input thread, which can take
+            // seconds for an RTSP teardown. Run it beside the SDK queue so
+            // other cameras' starts and stops are not queued behind it.
+            let retiring = VLCRetiringPlayer(player)
+            VLCSDKQueue.blocking.async { [self] in
+                let stopped = LumaStopVLCInput(retiring.player)
+                queue.async { [self] in finishRetirement(stopped: stopped, completion: completion) }
             }
-            // Both setters can acquire libVLC locks. Neither runs on the UI.
-            player.drawable = nil
-            player.media = nil
-            if ownsInterfaceLease {
-                VLCInterfaceLeases.shared.release(owner: leaseID)
-                ownsInterfaceLease = false
-            }
-            self.player = nil
-            media = nil
-            // The native input is fully stopped. Other SDK event references
-            // can now expire safely without keeping an active decoder alive.
-            DispatchQueue.main.async { completion(true) }
         }
+    }
+
+    private func finishRetirement(stopped: Bool, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard stopped, let player else {
+            // Never claim release succeeded if a future SDK changes the
+            // pinned bridging contract. Retain the player for safety.
+            DispatchQueue.main.async { completion(false) }
+            return
+        }
+        // Both setters can acquire libVLC locks. Neither runs on the UI.
+        player.drawable = nil
+        player.media = nil
+        if ownsInterfaceLease {
+            VLCInterfaceLeases.shared.release(owner: leaseID)
+            ownsInterfaceLease = false
+        }
+        self.player = nil
+        media = nil
+        // The native input is fully stopped. Other SDK event references
+        // can now expire safely without keeping an active decoder alive.
+        DispatchQueue.main.async { completion(true) }
     }
 
     private func startFirstFrameProbe() {

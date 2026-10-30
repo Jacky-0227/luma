@@ -4,7 +4,7 @@ import UIKit
 struct DashboardView: View {
     let store: CameraStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var dashboards = DashboardStore()
+    let dashboards: DashboardStore
     @State private var editor: DashboardEditorRoute?
     @State private var deleting: DashboardConfiguration?
     @State private var showingOrder = false
@@ -89,7 +89,9 @@ struct DashboardView: View {
             NavigationLink {
                 DashboardViewerView(dashboard: dashboard, store: store)
             } label: {
-                DashboardMosaic(cameras: Array(cameras.prefix(dashboard.pageSize)), columns: dashboard.columns, store: store)
+                // A cover never needs more than nine tiles; each may be a network snapshot.
+                DashboardMosaic(cameras: Array(cameras.prefix(min(dashboard.pageSize, 9))),
+                                columns: min(dashboard.columns, 3), store: store)
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
@@ -178,6 +180,12 @@ private struct DashboardCameraThumbnail: View {
         .clipped()
         .task(id: DashboardPreviewService.cacheKey(for: camera)) {
             thumbnail = nil
+            // Prefer the local "last viewed" frame: no Keychain read, no network.
+            if let data = await store.thumbnails.imageData(for: camera), let image = UIImage(data: data) {
+                guard !Task.isCancelled else { return }
+                thumbnail = image
+                return
+            }
             guard let password = try? store.password(for: camera) else { return }
             let image = await DashboardPreviewService.shared.image(for: camera, password: password)
             guard !Task.isCancelled else { return }

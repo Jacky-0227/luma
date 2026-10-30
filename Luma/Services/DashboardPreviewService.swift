@@ -59,11 +59,19 @@ actor DashboardPreviewLoader {
         try DashboardSnapshotRequest.validate(response)
         var body = Data()
         if response.expectedContentLength > 0 { body.reserveCapacity(Int(response.expectedContentLength)) }
+        // Collect into a fixed chunk and append in blocks, not per byte.
+        var chunk = [UInt8]()
+        chunk.reserveCapacity(16_384)
         for try await byte in bytes {
-            guard body.count < DashboardSnapshotRequest.maximumBytes else { throw PTZError.invalidResponse }
-            if body.count.isMultiple(of: 4096) { try Task.checkCancellation() }
-            body.append(byte)
+            chunk.append(byte)
+            guard chunk.count == 16_384 else { continue }
+            body.append(contentsOf: chunk)
+            chunk.removeAll(keepingCapacity: true)
+            guard body.count <= DashboardSnapshotRequest.maximumBytes else { throw PTZError.invalidResponse }
+            try Task.checkCancellation()
         }
+        body.append(contentsOf: chunk)
+        guard body.count <= DashboardSnapshotRequest.maximumBytes else { throw PTZError.invalidResponse }
         try Task.checkCancellation()
         return body
     }

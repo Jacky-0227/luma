@@ -324,8 +324,14 @@ final class VLCPlaybackSession {
         onEvent = nil
         driver?.setMuted(true)
         if capture != nil {
+            // The expiration handler runs on the main thread and must end the
+            // task before returning. Cleanup continues without background time.
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Finish local capture") { [weak self] in
-                Task { @MainActor in self?.failCapture() }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.failCapture()
+                    self.endBackgroundTask()
+                }
             }
             if capture?.kind == .recording { finishRecording() }
         } else {
@@ -359,13 +365,17 @@ final class VLCPlaybackSession {
         abandonedCaptures = []
         if let recordingWorkspace { MediaLibrary.shared.discard(recordingWorkspace) }
         recordingWorkspace = nil
-        if backgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
-        }
+        endBackgroundTask()
         let completions = retirementCompletions
         retirementCompletions = []
         for completion in completions { completion() }
         retirementRetainer = nil
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        let task = backgroundTask
+        backgroundTask = .invalid
+        UIApplication.shared.endBackgroundTask(task)
     }
 }

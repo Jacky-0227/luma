@@ -60,11 +60,13 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 | Configuration backup | Import/export JSON without passwords, snapshots or recordings |
 | Appearance and language | Light/dark mode, native Liquid Glass and three localizations |
 
-PTZ detection reads Hikvision capabilities for each axis and supports timed or continuous ISAPI movement. It never moves a camera to detect it. Luma sends Stop when you release, leave the view, enter the background, or reach a two-second hold limit. Continuous control depends on the camera receiving that command; an unconfirmed stop blocks further movement and offers a retry. HTTP controls require Digest authentication, and HTTPS uses system certificate validation. See [PTZ compatibility](docs/PTZ-compatibility.md).
+PTZ detection reads Hikvision capabilities for each axis and supports timed or continuous ISAPI movement. It never moves a camera to detect it. A hold keeps moving the camera for as long as your finger stays down. Luma sends Stop when you release, slide off the button, leave the view, or leave the app. Continuous control depends on the camera receiving that command; an unconfirmed stop blocks further movement and offers a retry. HTTP controls require Digest authentication, and HTTPS uses system certificate validation. See [PTZ compatibility](docs/PTZ-compatibility.md).
 
 **Not implemented:** automatic camera discovery, PTZ presets, two-way talk, camera SD-card/NVR recording search and playback, picture in picture, widgets and shortcuts. Playback in the media library refers to recordings made by Luma.
 
 Version 0.1.4 adds an image-only dashboard wall: 16:9 cells, narrow gutters and no visible camera labels or status footers. Source video remains aspect-fit. Single-camera viewing uses a 100 ms network buffer with bounded extra clock compensation, while dashboard streams retain their 500 ms buffer. Read-only PTZ status requests warm the control connection while live view is visible; movement and Stop do not wait for these reads. These are playback/control improvements, not an end-to-end latency guarantee.
+
+The next version reworks the dashboard wall: cells size themselves to fill the screen and are centered, a page with fewer cameras than columns uses fewer columns, each tile shows a small camera name and live dot (switchable in the toolbar), offline tiles say they are retrying, a fixed glass page bar sits at the bottom and pages can be swiped. Tiles scrolled off screen stop decoding. Pulling down Control Center no longer disconnects the wall.
 
 In full screen, pinch to magnify the picture up to 6× and drag to look around. Tap **1×** to restore the whole picture. Digital zoom preserves proportions, keeps the same video connection, and does not move the camera or change the original snapshots/recordings. Leaving full screen or rotating the device resets the magnification.
 

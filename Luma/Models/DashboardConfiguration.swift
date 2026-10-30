@@ -36,9 +36,11 @@ struct DashboardConfiguration: Identifiable, Codable, Equatable, Sendable {
 
     func cameras(from available: [CameraConfiguration]) -> [CameraConfiguration] {
         var seen = Set<UUID>()
+        // One dictionary lookup per member instead of a linear scan each.
+        let byID = Dictionary(available.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var result = cameraIDs.compactMap { id -> CameraConfiguration? in
             guard seen.insert(id).inserted else { return nil }
-            return available.first { $0.id == id }
+            return byID[id]
         }
         if includesAllCameras {
             result += available.filter { seen.insert($0.id).inserted }

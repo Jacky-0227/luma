@@ -8,7 +8,7 @@ Recorder channels must match an explicit video-input mapping, a matching channel
 
 Partial axis information is supplemented by reading the same channel's configuration. Explicit denials survive merging. Documented success codes 0 and 1 are accepted only with an absent or consistent success substatus. Each axis prefers continuous control when explicitly supported; timed movement remains available otherwise. Explicit disabled axes and a continuous-control veto take precedence. Absolute/relative-only capability does not enable manual hold controls. Timed movements use short device-side pulses. Continuous movement requires a start followed by Stop; Luma's two-second hold limit is not a device-side timeout.
 
-Native touch-down and release events bypass the scroll view's initial touch delay. Stop is sent independently of an outstanding movement response. If an old movement finishes after Stop was issued, a final Stop follows it. Rapid changes keep only the newest still-held direction; releasing it discards that intent. Movement and Stop share an ephemeral session with two connection slots and session-only credentials. Failed stop attempts block further movement until a confirmed stop. Navigation and background transitions also request Stop. Camera execution time and video latency still require physical-device measurement.
+Native touch-down and release events bypass the scroll view's initial touch delay. Stop is sent independently of an outstanding movement response. If an old movement finishes after Stop was issued, a final Stop follows it. Rapid changes keep only the newest still-held direction; releasing it discards that intent. Movement and Stop share an ephemeral session with two connection slots and session-only credentials. Failed stop attempts block further movement until a confirmed stop. A hold has no time limit; releasing, sliding off the button, navigation and background transitions request Stop. Camera execution time and video latency still require physical-device measurement.
 
 ## 繁體中文
 
@@ -16,7 +16,7 @@ Luma 只讀取資訊來偵測雲台。XML 缺少選填欄位，不代表攝影�
 
 錄影機通道必須有明確的影像輸入對應、相同通道 ID，或沿用已設定的控制通道。不會因設備只回傳一個雲台通道就猜測其對應攝影機。明確拒絕存取時會單獨提示帳號及權限；網路失敗或格式錯誤仍標示為無法確定，皆可重新偵測。
 
-只有部分軸資訊時，會補讀同一通道設定，合併時保留明確禁用的標誌。成功狀態碼相容 0 及 1，但矛盾的子狀態仍拒絕。各軸明確支援時優先使用連續控制，否則保留限時短脈衝；明確禁用及連續控制否決標誌優先。只有絕對／相對位置能力不會啟用按住移動。兩秒按住上限不等於攝影機端具備自動停止。
+只有部分軸資訊時，會補讀同一通道設定，合併時保留明確禁用的標誌。成功狀態碼相容 0 及 1，但矛盾的子狀態仍拒絕。各軸明確支援時優先使用連續控制，否則保留限時短脈衝；明確禁用及連續控制否決標誌優先。只有絕對／相對位置能力不會啟用按住移動。按住移動沒有時間上限，停止完全依賴放開時送出的停止指令；攝影機端不一定具備自動停止。
 
 原生按下、放開事件不等待滾動視圖的初始觸控延遲。停止指令獨立發送，不等待移動回應；舊移動較晚完成時會補發停止。快速換向只保留最新且仍按住的方向，放開即清除。移動及停止共用暫存連線階段，提供兩個連線槽及僅存於該階段的憑據。停止重試失敗會暫停新的移動，直到確認停止。離開畫面或進入背景亦會要求停止。設備執行時間及影片延遲仍須實機量測。
 
@@ -26,7 +26,7 @@ Luma 仅读取信息来检测云台。XML 缺少可选字段，不代表摄像�
 
 录像机通道必须有明确的视频输入对应、相同通道 ID，或沿用已设置的控制通道。不会因为设备只返回一个云台通道就猜测其对应摄像头。明确拒绝访问时会单独提示账号及权限；网络失败或格式错误仍标记为无法确定，均可重新检测。
 
-只有部分轴信息时，会补读同一通道配置，合并时保留明确禁用的标志。成功状态码兼容 0 和 1，但矛盾的子状态仍拒绝。各轴明确支持时优先使用连续控制，否则保留限时短脉冲；明确禁用及连续控制否决标志优先。只有绝对／相对位置能力不会启用按住移动。两秒按住上限不等于摄像头端具备自动停止。
+只有部分轴信息时，会补读同一通道配置，合并时保留明确禁用的标志。成功状态码兼容 0 和 1，但矛盾的子状态仍拒绝。各轴明确支持时优先使用连续控制，否则保留限时短脉冲；明确禁用及连续控制否决标志优先。只有绝对／相对位置能力不会启用按住移动。按住移动没有时间上限，停止完全依赖松手时发送的停止指令；摄像头端不一定具备自动停止。
 
 原生按下、松开事件不等待滚动视图的初始触摸延迟。停止指令独立发送，不等待移动响应；旧移动较晚完成时会补发停止。快速换向只保留最新且仍按住的方向，松手即清除。移动及停止共用临时会话，提供两个连接槽及仅存于会话中的凭据。停止重试失败会暂停新的移动，直到确认停止。离开画面或进入后台也会要求停止。设备执行时间及视频延迟仍须实机测量。
 
