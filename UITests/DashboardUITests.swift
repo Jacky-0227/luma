@@ -4,7 +4,7 @@ final class DashboardUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
-    func testVideoWallLayoutsRemainProportionalAndUnlabelled() throws {
+    func testVideoWallLayoutsRemainProportionalWithNamesOnWideTiles() throws {
         for count in [4, 8, 16] {
             let app = XCUIApplication()
             app.launchArguments = ["--ui-testing", "--ui-test-wall", "--ui-test-dark",
@@ -24,7 +24,9 @@ final class DashboardUITests: XCTestCase {
             }
             let columns = count == 16 ? 4 : 2
             XCTAssertEqual(frames[columns - 1].maxX - frames[0].minX, app.frame.width - 16, accuracy: 2)
-            XCTAssertFalse(app.staticTexts["View 01"].exists)
+            // Two-column tiles are wide enough for a camera name; four-column
+            // phone tiles stay image-only. Status words are never overlaid.
+            XCTAssertEqual(app.staticTexts["View 01"].exists, columns == 2)
             XCTAssertFalse(app.staticTexts["Live · Muted"].exists)
             XCTAssertFalse(app.tabBars.firstMatch.isHittable)
             capture("en-dashboard-wall-\(count)-offline-layout")
@@ -117,8 +119,8 @@ final class DashboardUITests: XCTestCase {
             XCTAssertGreaterThan(tile.frame.width, 50)
             XCTAssertEqual(tile.frame.width / tile.frame.height, 16.0 / 9.0, accuracy: 0.04)
         }
-        XCTAssertFalse(app.staticTexts["Entry"].exists)
-        XCTAssertFalse(app.staticTexts["Garden"].exists)
+        XCTAssertTrue(app.staticTexts["Entry"].exists)
+        XCTAssertTrue(app.staticTexts["Garden"].exists)
         XCTAssertFalse(app.staticTexts["Live · Muted"].exists)
         XCTAssertFalse(app.staticTexts["Fluent streams, sound off. Every view keeps its original proportions."].exists)
         XCTAssertFalse(app.tabBars.firstMatch.isHittable)
