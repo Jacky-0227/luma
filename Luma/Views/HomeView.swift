@@ -26,7 +26,7 @@ struct HomeView: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 12)
                 .padding(.bottom, 36)
-                .frame(maxWidth: 720)
+                .frame(maxWidth: 1100)
                 .frame(maxWidth: .infinity)
             }
             .background { LumaBackground() }
@@ -66,8 +66,9 @@ struct HomeView: View {
         }
     }
 
+    /// One column on a portrait phone; two or more on wider screens.
     private var cameraCollection: some View {
-        LazyVStack(spacing: 18) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 18)], spacing: 18) {
             ForEach(store.cameras) { camera in
                 NavigationLink {
                     CameraConnectionView(configuration: camera, store: store)
@@ -159,14 +160,16 @@ private struct CameraCard: View {
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .clipped()
             .overlay(alignment: .topLeading) {
-                Text(thumbnail == nil ? String(localized: "READY TO CONNECT") : String(localized: "Last viewed"))
-                    .font(.caption2.weight(.semibold))
-                    .tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.55), in: .capsule)
-                    .padding(14)
+                // Only a saved frame needs explaining: it is not live video.
+                if thumbnail != nil {
+                    Text("Last viewed")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: .capsule)
+                        .padding(14)
+                }
             }
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -174,7 +177,7 @@ private struct CameraCard: View {
                     Text(camera.displayAddress).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "arrow.up.right").font(.body.weight(.medium)).foregroundStyle(.secondary)
+                Image(systemName: "chevron.right").font(.body.weight(.semibold)).foregroundStyle(.tertiary)
             }
             .padding(20)
         }
@@ -183,7 +186,7 @@ private struct CameraCard: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(camera.name))
         .accessibilityHint(Text("Open live view"))
-        .accessibilityValue(Text(thumbnail == nil ? String(localized: "READY TO CONNECT") : String(localized: "Last viewed")))
+        .accessibilityValue(thumbnail == nil ? Text(verbatim: "") : Text("Last viewed"))
         .task(id: PreviewRequest(source: CameraThumbnailStore.key(for: camera), revision: previewRevision)) {
             thumbnail = nil
             let data = await thumbnails.imageData(for: camera)

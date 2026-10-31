@@ -87,7 +87,7 @@ struct DashboardView: View {
         let cameras = dashboard.cameras(from: store.cameras)
         return VStack(alignment: .leading, spacing: 0) {
             NavigationLink {
-                DashboardViewerView(dashboard: dashboard, store: store)
+                DashboardViewerView(dashboard: dashboard, store: store, dashboards: dashboards)
             } label: {
                 // A cover never needs more than nine tiles; each may be a network snapshot.
                 DashboardMosaic(cameras: Array(cameras.prefix(min(dashboard.pageSize, 9))),

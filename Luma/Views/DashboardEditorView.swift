@@ -18,7 +18,7 @@ struct DashboardEditorView: View {
         // This sheet intentionally owns an editable snapshot until Save.
         initial.cameraIDs = initial.cameras(from: store.cameras).map(\.id)
         _draft = State(initialValue: initial)
-        _customPageSize = State(initialValue: ![4, 8, 16].contains(initial.pageSize))
+        _customPageSize = State(initialValue: !DashboardViewerView.layoutChoices.contains(initial.pageSize))
     }
 
     private var selectedCameras: [CameraConfiguration] { draft.cameras(from: store.cameras) }
@@ -34,20 +34,17 @@ struct DashboardEditorView: View {
                         .onSubmit { nameFocused = false }
                         .accessibilityIdentifier("dashboard.name")
                 }
-                Section("Layout") {
+                Section {
                     Picker("Views per page", selection: Binding(
                         get: { customPageSize ? 0 : draft.pageSize },
                         set: { count in
                             customPageSize = count == 0
-                            if count != 0 {
-                                draft.pageSize = count
-                                draft.columns = count == 4 ? 2 : 4
-                            }
+                            if count != 0 { draft.pageSize = count }
                         }
                     )) {
-                        Text("4").tag(4)
-                        Text("8").tag(8)
-                        Text("16").tag(16)
+                        ForEach(DashboardViewerView.layoutChoices, id: \.self) { count in
+                            Text(count.formatted()).tag(count)
+                        }
                         Text("Custom").tag(0)
                     }
                     .pickerStyle(.segmented)
@@ -59,17 +56,10 @@ struct DashboardEditorView: View {
                         .accessibilityIdentifier("dashboard.customPageSize")
                         .accessibilityValue(String(draft.pageSize))
                     }
-                    Stepper(value: $draft.columns, in: 1...8) {
-                        Text(String(format: String(localized: "%lld columns"), Int64(draft.columns)))
-                    }
-                    .accessibilityIdentifier("dashboard.columns")
-                    .accessibilityValue(String(draft.columns))
-                    Text("Video keeps its original proportions. Black bars appear when needed.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text("More live views use more network bandwidth and device resources.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Views per page")
+                } footer: {
+                    Text("Views are arranged to fill the screen in portrait and landscape. More live views use more network bandwidth.")
                 }
                 Section {
                     Toggle("Include all cameras", isOn: $draft.includesAllCameras)
@@ -165,6 +155,7 @@ struct DashboardEditorView: View {
     private func save() {
         do {
             draft.cameraIDs = selectedCameras.map(\.id)
+            draft.columns = DashboardConfiguration.coverColumns(forPageSize: draft.pageSize)
             try dashboards.save(draft)
             dismiss()
         } catch { message = InterfaceMessage(text: error.localizedDescription) }

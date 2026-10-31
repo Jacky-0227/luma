@@ -225,13 +225,56 @@ final class VLCNativeDriver: @unchecked Sendable {
         }
     }
 
+    /// libvlc copies the next picture the vout *displays* and silently gives
+    /// up after 500 ms. A live stream reports decoded frames while it is still
+    /// pre-rolling its PTS delay, so a single request right after the first
+    /// frame can be lost. The native call is synchronous and leaves no pending
+    /// request when it fails, so retry until the file exists or time runs out.
     func captureSnapshot(at path: String, submitted: @escaping @MainActor @Sendable (Bool) -> Void) {
         queue.async { [self] in
-            let accepted = !isCancelled && player.map { LumaRequestSnapshot($0, path) } == true
-            let stats = media?.statistics
-            Self.captureLog.notice("snapshot_requested accepted=\(accepted) decoded=\(stats?.decodedVideo ?? 0) displayed=\(stats?.displayedPictures ?? 0)")
-            DispatchQueue.main.async { submitted(accepted) }
+            requestSnapshot(at: path, attempts: 0, deadline: .now() + Self.snapshotWindow,
+                            nextBlindAttempt: .now(), submitted: submitted)
         }
+    }
+
+    /// Below the session's 8 s capture timeout.
+    private static let snapshotWindow: DispatchTimeInterval = .seconds(6)
+
+    private func requestSnapshot(at path: String, attempts: Int, deadline: DispatchTime, nextBlindAttempt: DispatchTime,
+                                 submitted: @escaping @MainActor @Sendable (Bool) -> Void) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !isCancelled, let player, let media else {
+            DispatchQueue.main.async { submitted(false) }
+            return
+        }
+        let stats = media.statistics
+        var attempts = attempts
+        var nextBlindAttempt = nextBlindAttempt
+        // Displayed-picture statistics can lag the vout, so also try once a
+        // second without them instead of waiting on the counter forever.
+        if stats.displayedPictures > 0 || DispatchTime.now() >= nextBlindAttempt {
+            attempts += 1
+            nextBlindAttempt = .now() + .seconds(1)
+            if LumaRequestSnapshot(player, path), Self.fileHasContent(atPath: path) {
+                Self.captureLog.notice("snapshot_written attempts=\(attempts) decoded=\(stats.decodedVideo) displayed=\(stats.displayedPictures)")
+                DispatchQueue.main.async { submitted(true) }
+                return
+            }
+        }
+        guard DispatchTime.now() < deadline else {
+            Self.captureLog.notice("snapshot_unavailable attempts=\(attempts) decoded=\(stats.decodedVideo) displayed=\(stats.displayedPictures)")
+            DispatchQueue.main.async { submitted(false) }
+            return
+        }
+        queue.asyncAfter(deadline: .now() + .milliseconds(150)) { [self, attempts, nextBlindAttempt] in
+            requestSnapshot(at: path, attempts: attempts, deadline: deadline,
+                            nextBlindAttempt: nextBlindAttempt, submitted: submitted)
+        }
+    }
+
+    private static func fileHasContent(atPath path: String) -> Bool {
+        let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue ?? 0
+        return size > 0
     }
 
     func startRecording(at path: String, submitted: @escaping @MainActor @Sendable (Bool) -> Void) {

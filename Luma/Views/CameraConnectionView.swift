@@ -96,6 +96,7 @@ private struct LiveCameraView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     let player: CameraPlayer
     let configuration: CameraConfiguration
     let ptz: PTZController?
@@ -117,15 +118,13 @@ private struct LiveCameraView: View {
                 if !fullscreen {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 26) {
-                            playbackControls
-                            captureControls
+                            VStack(alignment: .leading, spacing: 14) {
+                                controlBar
+                                statusMessages
+                            }
                             if let ptz { PTZControlsView(controller: ptz) }
                             else { automaticControlStatus }
                             connectionDetails
-                            Label("Live view pauses when Luma is in the background.", systemImage: "moon")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(24)
                         .frame(maxWidth: 720)
@@ -149,17 +148,26 @@ private struct LiveCameraView: View {
         .sheet(isPresented: $showingPTZ) {
             if let ptz {
                 NavigationStack {
-                    ScrollView { PTZControlsView(controller: ptz).padding(24) }
+                    ScrollView { PTZControlsView(controller: ptz, showsTitle: false).padding(24) }
                         .navigationTitle("Pan, tilt & zoom")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingPTZ = false } } }
                 }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.fraction(0.62), .large])
                 .presentationDragIndicator(.visible)
+                // Over full-screen video, like the player itself.
+                .preferredColorScheme(.dark)
             }
+        }
+        // Turning the phone sideways shows the camera full screen, as in
+        // NVR apps; turning it back restores the controls.
+        .onChange(of: verticalSizeClass) { _, sizeClass in
+            guard rotatesToFullscreen else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { fullscreen = sizeClass == .compact }
         }
         .onAppear {
             isVisible = true
+            if rotatesToFullscreen, verticalSizeClass == .compact { fullscreen = true }
             if scenePhase == .active {
                 player.play()
                 UIApplication.shared.isIdleTimerDisabled = true
@@ -344,96 +352,138 @@ private struct LiveCameraView: View {
         }
     }
 
-    private var playbackControls: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if case .failed(let message) = player.state {
-                Label(message, systemImage: "wifi.exclamationmark")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+    /// Phones only: an iPad keeps a regular height in landscape.
+    private var rotatesToFullscreen: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+
+    private var isRecording: Bool { player.captureState == .recording }
+
+    /// One row of player tools under the video, like the toolbar of NVR apps.
+    private var controlBar: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top),
+                                 count: dynamicTypeSize.isAccessibilitySize ? 2 : 5),
+                  spacing: 16) {
+            Button("Snapshot", systemImage: "camera") { player.captureSnapshot() }
+                .disabled(player.state != .playing || player.captureState != .idle)
+                .accessibilityIdentifier("player.snapshot")
+            Button {
+                player.toggleRecording()
+            } label: {
+                Label(isRecording ? String(localized: "Stop") : String(localized: "Record"),
+                      systemImage: isRecording ? "stop.fill" : "record.circle")
             }
-            HStack {
-                Text("Live view").font(.title2.weight(.semibold))
-                Spacer()
-                Button("Reconnect", systemImage: "arrow.clockwise") { player.retry() }
-                    .labelStyle(.iconOnly)
-                    .frame(width: 44, height: 44)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
+            .labelStyle(LiveControlLabelStyle(tint: isRecording ? .red : .primary))
+            .accessibilityLabel(isRecording ? Text("Stop recording") : Text("Record"))
+            .disabled((player.captureState != .idle && !isRecording) || (player.state != .playing && !isRecording))
+            .accessibilityIdentifier("player.record")
+            Menu {
+                Picker("Stream quality", selection: Binding(get: { player.quality }, set: { player.setQuality($0) })) {
+                    ForEach(StreamQuality.allCases) { quality in Text(quality.title).tag(quality) }
+                }
+            } label: {
+                Label(player.quality.title, systemImage: "slider.horizontal.3")
             }
-            Picker("Stream quality", selection: Binding(get: { player.quality }, set: { player.setQuality($0) })) {
-                ForEach(StreamQuality.allCases) { quality in Text(quality.title).tag(quality) }
-            }
-            .pickerStyle(.segmented)
+            .accessibilityLabel(Text("Stream quality"))
+            .accessibilityValue(Text(player.quality.title))
             .disabled(!configuration.customPath.isEmpty)
             .accessibilityIdentifier("player.quality")
-            Text(configuration.customPath.isEmpty
-                 ? String(localized: "Clear uses the main stream. Fluent uses less bandwidth.")
-                 : String(localized: "This camera uses a custom stream path."))
+            Button {
+                player.setAspectFill(!player.aspectFill)
+            } label: {
+                Label("Fill", systemImage: player.aspectFill ? "aspectratio.fill" : "aspectratio")
+            }
+            .labelStyle(LiveControlLabelStyle(tint: player.aspectFill ? LumaTheme.accent : .primary))
+            .accessibilityLabel(Text("Fill video frame"))
+            .accessibilityAddTraits(player.aspectFill ? .isSelected : [])
+            .accessibilityIdentifier("player.fill")
+            Button("Reconnect", systemImage: "arrow.clockwise") { player.retry() }
+                .accessibilityIdentifier("player.reconnect")
+        }
+        .buttonStyle(.plain)
+        .labelStyle(LiveControlLabelStyle())
+    }
+
+    @ViewBuilder
+    private var statusMessages: some View {
+        if case .failed(let message) = player.state {
+            Label(message, systemImage: "wifi.exclamationmark")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if !configuration.customPath.isEmpty {
+            Text("This camera uses a custom stream path.")
                 .font(.footnote).foregroundStyle(.secondary)
-            Toggle("Fill video frame", isOn: Binding(get: { player.aspectFill }, set: { player.setAspectFill($0) }))
-                .font(.subheadline)
+        }
+        if let startedAt = player.recordingStartedAt {
+            HStack {
+                Label("Recording", systemImage: "record.circle.fill").foregroundStyle(.red)
+                Text(startedAt, style: .timer).monospacedDigit()
+            }
+            .font(.subheadline)
+        }
+        if player.captureState == .savingSnapshot || player.captureState == .startingRecording || player.captureState == .finishingRecording {
+            ProgressView(player.captureState == .startingRecording
+                         ? String(localized: "Starting recording…") : String(localized: "Saving media…"))
+        }
+        if let message = player.captureMessage {
+            Label(message, systemImage: "checkmark.circle").font(.callout)
+        }
+        if let error = player.captureError {
+            Label(error, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.secondary)
         }
     }
 
     private var connectionDetails: some View {
-        VStack(spacing: 15) {
-            LabeledContent("Device", value: configuration.host)
-            Divider()
-            LabeledContent("Channel", value: configuration.channel.formatted())
-            Divider()
-            LabeledContent("Transport", value: configuration.useTCP ? "RTSP · TCP" : "RTSP · UDP")
-        }
-        .font(.subheadline)
-        .padding(20)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
-    }
-
-    private var captureControls: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            captureLayout {
-                Button("Snapshot", systemImage: "camera") { player.captureSnapshot() }
-                    .disabled(player.state != .playing || player.captureState != .idle)
-                    .accessibilityIdentifier("player.snapshot")
-                Button {
-                    player.toggleRecording()
-                } label: {
-                    Label(player.captureState == .recording ? String(localized: "Stop recording") : String(localized: "Record"),
-                          systemImage: player.captureState == .recording ? "stop.circle" : "record.circle")
-                }
-                .tint(player.captureState == .recording ? .red : LumaTheme.accent)
-                .disabled((player.captureState != .idle && player.captureState != .recording)
-                          || (player.state != .playing && player.captureState != .recording))
-                .accessibilityIdentifier("player.record")
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 15) {
+                LabeledContent("Device", value: configuration.host)
+                Divider()
+                LabeledContent("Channel", value: configuration.channel.formatted())
+                Divider()
+                LabeledContent("Transport", value: configuration.useTCP ? "RTSP · TCP" : "RTSP · UDP")
             }
-            .buttonStyle(.glass)
-            .controlSize(.large)
-            if let startedAt = player.recordingStartedAt {
-                HStack {
-                    Label("Recording", systemImage: "record.circle.fill").foregroundStyle(.red)
-                    Text(startedAt, style: .timer).monospacedDigit()
-                }
-                .font(.subheadline)
-            }
-            if player.captureState == .savingSnapshot || player.captureState == .startingRecording || player.captureState == .finishingRecording {
-                ProgressView(player.captureState == .startingRecording
-                             ? String(localized: "Starting recording…") : String(localized: "Saving media…"))
-            }
-            if let message = player.captureMessage {
-                Label(message, systemImage: "checkmark.circle").font(.callout)
-            }
-            if let error = player.captureError {
-                Label(error, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.secondary)
-            }
-            Text("Recordings stop automatically after 5 minutes.")
-                .font(.footnote).foregroundStyle(.secondary)
+            .font(.subheadline)
+            .padding(20)
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 24))
+            Text("Live view pauses when Luma is in the background. Recordings stop automatically after 5 minutes.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
 
-    private var captureLayout: AnyLayout {
-        dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
-            : AnyLayout(HStackLayout(spacing: 14))
+/// An icon in a glass circle with a caption below it.
+private struct LiveControlLabelStyle: LabelStyle {
+    var tint: Color = .primary
+
+    func makeBody(configuration: Configuration) -> some View {
+        LiveControlLabel(icon: configuration.icon, title: configuration.title, tint: tint)
+    }
+}
+
+private struct LiveControlLabel<Icon: View, Title: View>: View {
+    @Environment(\.isEnabled) private var isEnabled
+    let icon: Icon
+    let title: Title
+    let tint: Color
+
+    var body: some View {
+        VStack(spacing: 6) {
+            icon
+                .font(.title3)
+                .foregroundStyle(tint)
+                .frame(width: 52, height: 52)
+                .modifier(GlassPanel(radius: 26))
+            title
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(.rect)
+        .opacity(isEnabled ? 1 : 0.4)
     }
 }
 

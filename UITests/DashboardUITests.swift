@@ -4,7 +4,7 @@ final class DashboardUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
     @MainActor
-    func testVideoWallLayoutsRemainProportionalWithNamesOnWideTiles() throws {
+    func testVideoWallFillsTheScreenWithProportionalNamedTiles() throws {
         for count in [4, 8, 16] {
             let app = XCUIApplication()
             app.launchArguments = ["--ui-testing", "--ui-test-wall", "--ui-test-dark",
@@ -19,17 +19,37 @@ final class DashboardUITests: XCTestCase {
             waitFor(NSPredicate(format: "count == %d", count), on: tiles)
             let frames = tiles.allElementsBoundByIndex.map(\.frame)
             for frame in frames {
-                XCTAssertGreaterThan(frame.width, 50)
+                XCTAssertGreaterThan(frame.width, 100)
                 XCTAssertEqual(frame.width / frame.height, 16.0 / 9.0, accuracy: 0.04)
+                // Every camera on the page is on screen without scrolling.
+                XCTAssertTrue(app.frame.contains(frame), "\(frame) is off screen")
             }
-            let columns = count == 16 ? 4 : 2
-            XCTAssertEqual(frames[columns - 1].maxX - frames[0].minX, app.frame.width - 16, accuracy: 2)
-            // Two-column tiles are wide enough for a camera name; four-column
-            // phone tiles stay image-only. Status words are never overlaid.
-            XCTAssertEqual(app.staticTexts["View 01"].exists, columns == 2)
+            // The old wall left a small grid floating in black space. Tiles
+            // now take the largest size that fits (about half the screen).
+            let tileArea = frames.reduce(0) { $0 + $1.width * $1.height }
+            XCTAssertGreaterThan(tileArea, app.frame.width * app.frame.height * 0.35)
+            // Phone tiles are wide enough for names. Status words are never overlaid.
+            XCTAssertTrue(app.staticTexts["View 01"].exists)
             XCTAssertFalse(app.staticTexts["Live · Muted"].exists)
             XCTAssertFalse(app.tabBars.firstMatch.isHittable)
             capture("en-dashboard-wall-\(count)-offline-layout")
+            if count == 4 {
+                // Landscape rearranges the same page into a grid.
+                XCUIDevice.shared.orientation = .landscapeLeft
+                defer { XCUIDevice.shared.orientation = .portrait }
+                let rotated = Date().addingTimeInterval(5)
+                while app.frame.width < app.frame.height, Date() < rotated { usleep(100_000) }
+                XCTAssertGreaterThan(app.frame.width, app.frame.height)
+                // Let the rotation animation and the relayout finish.
+                sleep(1)
+                let landscapeFrames = tiles.allElementsBoundByIndex.map(\.frame)
+                XCTAssertEqual(Set(landscapeFrames.map { Int($0.minY) }).count, 2, "Four cameras form two rows in landscape")
+                for frame in landscapeFrames {
+                    XCTAssertEqual(frame.width / frame.height, 16.0 / 9.0, accuracy: 0.04)
+                    XCTAssertTrue(app.frame.contains(frame), "\(frame) is off screen")
+                }
+                capture("en-dashboard-wall-4-landscape")
+            }
             app.terminate()
         }
     }
@@ -55,16 +75,14 @@ final class DashboardUITests: XCTestCase {
         XCTAssertTrue(pageSize.waitForExistence(timeout: 5))
         pageSize.buttons["16"].tap()
         XCTAssertTrue(pageSize.buttons["16"].isSelected)
-        let columns = app.steppers["dashboard.columns"]
-        XCTAssertEqual(columns.value as? String, "4")
+        // Columns follow the screen; there is no separate column setting.
+        XCTAssertFalse(app.steppers["dashboard.columns"].exists)
         pageSize.buttons["Custom"].tap()
         let customPageSize = app.steppers["dashboard.customPageSize"]
         XCTAssertTrue(customPageSize.waitForExistence(timeout: 5))
         XCTAssertEqual(customPageSize.value as? String, "16")
         customPageSize.buttons["dashboard.customPageSize-Increment"].tap()
         XCTAssertEqual(customPageSize.value as? String, "17")
-        columns.buttons["dashboard.columns-Decrement"].tap()
-        XCTAssertEqual(columns.value as? String, "3")
 
         let entry = selection("Entry", app: app)
         reveal(entry, app: app)
@@ -96,7 +114,6 @@ final class DashboardUITests: XCTestCase {
         XCTAssertEqual(name.value as? String, "Porch group")
         XCTAssertTrue(pageSize.buttons["Custom"].isSelected)
         XCTAssertEqual(customPageSize.value as? String, "17")
-        XCTAssertEqual(columns.value as? String, "3")
         capture("en-dashboard-layout")
         reveal(app.buttons["dashboard.move-up.\(entryID)"], app: app)
         XCTAssertFalse(app.buttons["dashboard.move-up.\(gardenID)"].isEnabled)

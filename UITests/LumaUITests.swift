@@ -68,8 +68,18 @@ final class LumaUITests: XCTestCase {
         // controls and teardown without touching a user's camera or credentials.
         savedCamera.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "player.status").firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["player.snapshot"].exists)
+        XCTAssertTrue(app.buttons["player.record"].exists)
+        XCTAssertTrue(app.buttons["player.reconnect"].exists)
+        capture("en-08-live-view-controls")
         app.buttons["player.mute"].tap()
         let fullscreen = app.buttons["player.fullscreen"]
+        // Turning the phone sideways shows the camera full screen.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLabel("Exit full screen", on: fullscreen)
+        capture("en-08a-landscape-fullscreen")
+        XCUIDevice.shared.orientation = .portrait
+        waitForLabel("Full screen", on: fullscreen)
         fullscreen.tap()
         waitForLabel("Exit full screen", on: fullscreen)
         let openPTZ = app.buttons["player.ptz"]

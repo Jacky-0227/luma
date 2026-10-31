@@ -4,6 +4,7 @@ import UIKit
 struct DashboardViewerView: View {
     let dashboard: DashboardConfiguration
     let store: CameraStore
+    let dashboards: DashboardStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("dashboard.showsNames") private var showsNames = true
@@ -16,9 +17,17 @@ struct DashboardViewerView: View {
     @State private var showingCamera = false
     @State private var navigationRequest: UUID?
     @State private var keepsScreenAwake = false
+    @State private var message: InterfaceMessage?
 
-    private static let spacing: CGFloat = 4
-    private static let gutter: CGFloat = 8
+    private static let spacing: CGFloat = 3
+    private static let gutter: CGFloat = 4
+    /// The split-screen choices of NVR apps. Other saved sizes stay available.
+    static let layoutChoices = [1, 4, 9, 16]
+
+    /// The saved dashboard, so a layout chosen here applies immediately.
+    private var current: DashboardConfiguration {
+        dashboards.dashboards.first { $0.id == dashboard.id } ?? dashboard
+    }
 
     /// One ordered lookup per body evaluation; pages are slices of it.
     private struct Pages {
@@ -36,7 +45,7 @@ struct DashboardViewerView: View {
     }
 
     private var pages: Pages {
-        Pages(ordered: dashboard.cameras(from: store.cameras), size: min(64, max(1, dashboard.pageSize)))
+        Pages(ordered: current.cameras(from: store.cameras), size: min(64, max(1, current.pageSize)))
     }
 
     var body: some View {
@@ -62,20 +71,23 @@ struct DashboardViewerView: View {
             footer(pageCount: pages.count)
         }
         .simultaneousGesture(pageSwipe(pageCount: pages.count))
-        .navigationTitle(dashboard.name)
+        .navigationTitle(current.name)
         .navigationSubtitle(liveSummary)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button(showsNames ? "Hide camera names" : "Show camera names",
-                       systemImage: showsNames ? "text.below.photo.fill" : "text.below.photo") {
-                    showsNames.toggle()
+                layoutMenu
+                Menu("Dashboard options", systemImage: "ellipsis") {
+                    Toggle(isOn: $showsNames) {
+                        Label("Show camera names", systemImage: "textformat")
+                    }
+                    .accessibilityIdentifier("dashboard.names")
+                    Button("Reconnect cameras", systemImage: "arrow.clockwise") { synchronize(forceRestart: true) }
+                        .disabled(pages.ordered.isEmpty || session.isTransitioning || isOpeningCamera)
+                        .accessibilityIdentifier("dashboard.reconnect")
                 }
-                .accessibilityIdentifier("dashboard.names")
-                Button("Reconnect cameras", systemImage: "arrow.clockwise") { synchronize(forceRestart: true) }
-                    .disabled(pages.ordered.isEmpty || session.isTransitioning || isOpeningCamera)
-                    .accessibilityIdentifier("dashboard.reconnect")
+                .accessibilityIdentifier("dashboard.more")
             }
         }
         .navigationDestination(isPresented: $showingCamera) {
@@ -119,9 +131,10 @@ struct DashboardViewerView: View {
             do { try await Task.sleep(for: .milliseconds(450)) } catch { return }
             showsPreparing = true
         }
-        // The wall is always dark, like the full-screen player.
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .environment(\.colorScheme, .dark)
+        .lumaAlert($message)
+        // The wall is always dark, like the live player. A preferred scheme
+        // also gives the status bar light text over the black wall.
+        .preferredColorScheme(.dark)
     }
 
     private var liveSummary: String {
@@ -130,10 +143,62 @@ struct DashboardViewerView: View {
         return String(format: String(localized: "%lld of %lld live"), Int64(session.playingCount), Int64(total))
     }
 
+    // MARK: Layout
+
+    /// Like the window-division button of NVR apps: choose how many cameras
+    /// share the screen. Their arrangement follows the screen automatically.
+    private var layoutMenu: some View {
+        Menu {
+            Picker("Views per page", selection: Binding(get: { current.pageSize }, set: { setPageSize($0) })) {
+                ForEach(Self.layoutChoices, id: \.self) { count in
+                    Label(Self.layoutTitle(count), systemImage: Self.layoutSymbol(count)).tag(count)
+                }
+                if !Self.layoutChoices.contains(current.pageSize) {
+                    Label(Self.layoutTitle(current.pageSize), systemImage: Self.layoutSymbol(current.pageSize))
+                        .tag(current.pageSize)
+                }
+            }
+        } label: {
+            Label("Views per page", systemImage: Self.layoutSymbol(current.pageSize))
+        }
+        .disabled(isOpeningCamera)
+        .accessibilityIdentifier("dashboard.layout")
+    }
+
+    static func layoutTitle(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 view") : String(format: String(localized: "%lld views"), Int64(count))
+    }
+
+    static func layoutSymbol(_ count: Int) -> String {
+        switch count {
+        case ...1: "rectangle"
+        case 2...4: "square.grid.2x2"
+        case 5...9: "square.grid.3x3"
+        default: "square.grid.4x3.fill"
+        }
+    }
+
+    private func setPageSize(_ size: Int) {
+        var updated = current
+        guard updated.pageSize != size else { return }
+        // Stay on the page that holds the first camera currently shown.
+        let firstShown = page * updated.pageSize
+        updated.pageSize = size
+        updated.columns = DashboardConfiguration.coverColumns(forPageSize: size)
+        do {
+            try dashboards.save(updated)
+        } catch {
+            message = InterfaceMessage(text: error.localizedDescription)
+            return
+        }
+        let target = firstShown / size
+        if target != page { page = target } else { synchronize() }
+    }
+
     // MARK: Wall
 
     private func wall(in size: CGSize) -> some View {
-        let layout = WallLayout(count: session.cameras.count, preferredColumns: preferredColumns,
+        let layout = WallLayout(count: session.cameras.count, maxColumns: maxColumns,
                                 size: size, spacing: Self.spacing, gutter: Self.gutter)
         return ScrollView {
             VStack(spacing: Self.spacing) {
@@ -151,11 +216,10 @@ struct DashboardViewerView: View {
                         }
                     }
                     // Keep a short last row aligned with the columns above.
-                    .frame(maxWidth: layout.contentWidth, alignment: .leading)
+                    .frame(width: layout.contentWidth, alignment: .leading)
                 }
             }
-            .padding(.horizontal, Self.gutter)
-            .padding(.vertical, Self.gutter)
+            .padding(Self.gutter)
             .frame(maxWidth: .infinity, minHeight: layout.fits ? size.height : 0)
         }
         .scrollDisabled(layout.fits)
@@ -165,8 +229,8 @@ struct DashboardViewerView: View {
         .onAppear { reportInitialVisibility(layout) }
     }
 
-    private var preferredColumns: Int {
-        dynamicTypeSize.isAccessibilitySize ? 1 : min(8, max(1, dashboard.columns))
+    private var maxColumns: Int {
+        dynamicTypeSize.isAccessibilitySize ? 1 : 8
     }
 
     /// Tiles below the first screen start paused; scroll visibility takes over.
@@ -280,9 +344,14 @@ struct DashboardViewerView: View {
     }
 }
 
-/// Sizes 16:9 cells to use the screen: fewer cameras than columns use fewer
-/// columns, and a wall that nearly fits is scaled to fit without scrolling.
+/// Picks the column count that gives the largest 16:9 tiles with every camera
+/// on screen, like a video-call gallery: on a portrait phone four cameras
+/// stack in one column, in landscape they form a 2 × 2 grid. When even the
+/// best fit would make tiles too small to read, the wall scrolls instead.
 struct WallLayout: Equatable {
+    static let minimumTileWidth: CGFloat = 100
+    static let columnPreference: CGFloat = 1.05
+
     let columns: Int
     let cell: CGSize
     let contentWidth: CGFloat
@@ -290,24 +359,34 @@ struct WallLayout: Equatable {
     /// Index of the first tile that starts below the visible area.
     let initiallyHiddenStart: Int
 
-    init(count: Int, preferredColumns: Int, size: CGSize, spacing: CGFloat, gutter: CGFloat) {
-        let columns = max(1, min(preferredColumns, max(1, count)))
-        let rows = max(1, (count + columns - 1) / columns)
+    init(count: Int, maxColumns: Int, size: CGSize, spacing: CGFloat, gutter: CGFloat) {
+        let tiles = max(1, count)
         let width = max(1, size.width - gutter * 2)
         let height = max(1, size.height - gutter * 2)
-        var cellWidth = max(1, (width - CGFloat(columns - 1) * spacing) / CGFloat(columns))
-        var cellHeight = cellWidth * 9 / 16
-        let total = CGFloat(rows) * cellHeight + CGFloat(rows - 1) * spacing
-        var fits = total <= height
-        if !fits {
-            // Shrink to fit (letterboxed sideways) while tiles stay legible.
-            let fittedHeight = (height - CGFloat(rows - 1) * spacing) / CGFloat(rows)
-            if fittedHeight * 16 / 9 >= 100 {
-                cellHeight = fittedHeight
-                cellWidth = fittedHeight * 16 / 9
-                fits = true
+        let limit = max(1, min(maxColumns, tiles))
+        var columns = 1
+        var cellWidth: CGFloat = 0
+        for candidate in 1...limit {
+            let rows = (tiles + candidate - 1) / candidate
+            let byWidth = (width - CGFloat(candidate - 1) * spacing) / CGFloat(candidate)
+            let byHeight = (height - CGFloat(rows - 1) * spacing) / CGFloat(rows) * 16 / 9
+            let candidateWidth = min(byWidth, byHeight)
+            // Prefer fewer columns (a fuller grid) unless more columns give
+            // clearly larger tiles, e.g. 3 × 3 over a ragged 5 + 4.
+            if candidateWidth > cellWidth * Self.columnPreference {
+                columns = candidate
+                cellWidth = candidateWidth
             }
         }
+        var fits = true
+        if cellWidth < Self.minimumTileWidth {
+            columns = max(1, min(limit, Int((width + spacing) / (Self.minimumTileWidth + spacing))))
+            cellWidth = (width - CGFloat(columns - 1) * spacing) / CGFloat(columns)
+            fits = false
+        }
+        cellWidth = max(1, cellWidth)
+        let cellHeight = cellWidth * 9 / 16
+        let rows = (tiles + columns - 1) / columns
         self.columns = columns
         self.cell = CGSize(width: cellWidth, height: cellHeight)
         self.contentWidth = cellWidth * CGFloat(columns) + spacing * CGFloat(columns - 1)
@@ -346,7 +425,7 @@ private struct DashboardCameraTile: View {
     var body: some View {
         // The cell determines its size. The native drawable only fills that
         // proposal and keeps the stream's display aspect ratio (letterboxed).
-        Color.black
+        Color(white: 0.06)
             .overlay {
                 if let player = camera.player {
                     VideoSurface(player: player)
@@ -358,8 +437,7 @@ private struct DashboardCameraTile: View {
             .overlay(alignment: .bottomLeading) {
                 if showsName { nameLabel }
             }
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.08), lineWidth: 0.5) }
+            .clipShape(.rect(cornerRadius: 6))
     }
 
     private var nameLabel: some View {

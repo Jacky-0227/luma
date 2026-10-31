@@ -51,7 +51,7 @@ The test camera is intentionally offline. This screenshot demonstrates the contr
 | Available in this preview | Details |
 | --- | --- |
 | Live view | Main/sub streams, sound, full screen, fill/fit and bounded reconnect attempts |
-| Dashboard | Named groups, camera ordering, 4/8/16 or custom 1–64 views per page, 1–8 columns and snapshot covers; all video keeps its original proportions |
+| Dashboard | Named groups, camera ordering, 1/4/9/16 or custom 1–64 views per page with automatic columns, and snapshot covers; all video keeps its original proportions |
 | PTZ | Automatically detects supported pan, tilt and zoom controls; separate web control port |
 | Home previews | A local snapshot from the last successful opening identifies each camera; no live stream is opened by the home card |
 | Clear navigation | Daily screens use section names; brand messages appear on the first-launch welcome screen |
@@ -66,13 +66,13 @@ PTZ detection reads Hikvision capabilities for each axis and supports timed or c
 
 Version 0.1.4 adds an image-only dashboard wall: 16:9 cells, narrow gutters and no visible camera labels or status footers. Source video remains aspect-fit. Single-camera viewing uses a 100 ms network buffer with bounded extra clock compensation, while dashboard streams retain their 500 ms buffer. Read-only PTZ status requests warm the control connection while live view is visible; movement and Stop do not wait for these reads. These are playback/control improvements, not an end-to-end latency guarantee.
 
-The next version reworks the dashboard wall: cells size themselves to fill the screen and are centered, a page with fewer cameras than columns uses fewer columns, each tile shows a small camera name and live dot (switchable in the toolbar), offline tiles say they are retrying, a fixed glass page bar sits at the bottom and pages can be swiped. Tiles scrolled off screen stop decoding. Pulling down Control Center no longer disconnects the wall.
+The next version reworks the dashboard wall: columns are chosen automatically to give the largest tiles that fit (on a portrait iPhone four cameras stack in one column; in landscape they form a 2 × 2 grid), the toolbar has a 1/4/9/16 split-screen menu like NVR apps, each tile shows a small camera name and live dot (switchable in the toolbar menu), offline tiles say they are retrying, and pages can be changed with the glass page bar or by swiping. Tiles scrolled off screen stop decoding. Pulling down Control Center no longer disconnects the wall. Live view puts snapshot, record, quality, fill and reconnect in one row of buttons under the video, and turning an iPhone sideways shows the camera full screen.
 
 In full screen, pinch to magnify the picture up to 6× and drag to look around. Tap **1×** to restore the whole picture. Digital zoom preserves proportions, keeps the same video connection, and does not move the camera or change the original snapshots/recordings. Leaving full screen or rotating the device resets the magnification.
 
 See the [0.1.4 validation record and gesture screenshots](docs/validation-0.1.4.md) for tested scope and remaining device checks.
 
-Use **Dashboard → +** to name a group, choose cameras and arrange their order. Choose 4, 8, 16 or a custom number of views per page (1–64), and 1–8 columns. The first page forms its cover. All tiles preserve the source aspect ratio with black bars when needed; video is never stretched or squeezed. Covers use small in-memory device snapshots, so devices without a compatible snapshot endpoint show a placeholder. Dashboard layouts stay on this iPhone and are not included in camera configuration exports. Higher live-view counts use more decoding capacity, memory and bandwidth; the configurable limit is not a guarantee of smooth playback on every phone.
+Use **Dashboard → +** to name a group, choose cameras and arrange their order. Choose 1, 4, 9, 16 or a custom number of views per page (1–64); columns follow the screen automatically. The first page forms its cover. All tiles preserve the source aspect ratio with black bars when needed; video is never stretched or squeezed. Covers use small in-memory device snapshots, so devices without a compatible snapshot endpoint show a placeholder. Dashboard layouts stay on this iPhone and are not included in camera configuration exports. Higher live-view counts use more decoding capacity, memory and bandwidth; the configurable limit is not a guarantee of smooth playback on every phone.
 
 Version 0.1.3 adds older Hikvision API/response formats and sends Stop without waiting for an outstanding move response. Its [protocol research map](docs/PTZ-protocol-reference.md) distinguishes implemented ISAPI/IPMD support from ONVIF, PSIA and SDK interfaces that have only been researched.
 

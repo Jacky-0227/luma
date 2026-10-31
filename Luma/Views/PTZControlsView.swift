@@ -2,11 +2,15 @@ import SwiftUI
 
 struct PTZControlsView: View {
     let controller: PTZController
+    /// A sheet already shows the title in its navigation bar.
+    var showsTitle = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label("Pan, tilt & zoom", systemImage: "move.3d")
-                .font(.title2.weight(.semibold))
+            if showsTitle {
+                Label("Pan, tilt & zoom", systemImage: "move.3d")
+                    .font(.title2.weight(.semibold))
+            }
             Text("Hold a direction to move. Release to stop.")
                 .font(.subheadline).foregroundStyle(.secondary)
             GlassEffectContainer(spacing: 12) {

@@ -270,3 +270,8 @@
 "Offline · retrying" = "Offline · retrying";
 "1 camera added." = "1 camera added.";
 "iOS only allows plain HTTP to IP addresses, single-word names and .local names. Use one of those, or HTTPS, for controls and previews." = "iOS only allows plain HTTP to IP addresses, single-word names and .local names. Use one of those, or HTTPS, for controls and previews.";
+"1 view" = "1 view";
+"%lld views" = "%lld views";
+"Fill" = "Fill";
+"Views are arranged to fill the screen in portrait and landscape. More live views use more network bandwidth." = "Views are arranged to fill the screen in portrait and landscape. More live views use more network bandwidth.";
+"Live view pauses when Luma is in the background. Recordings stop automatically after 5 minutes." = "Live view pauses when Luma is in the background. Recordings stop automatically after 5 minutes.";

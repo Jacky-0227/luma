@@ -23,12 +23,10 @@ struct MediaLibraryView: View {
                         Button {
                             selectedItem = item
                         } label: {
-                            HStack(spacing: 16) {
-                                Image(systemName: item.kind == .snapshot ? "photo" : "play.rectangle")
-                                    .font(.title2)
-                                    .foregroundStyle(.tint)
-                                    .frame(width: 46, height: 46)
-                                    .background(.tint.opacity(0.08), in: .rect(cornerRadius: 12))
+                            HStack(spacing: 14) {
+                                MediaThumbnail(item: item, url: library.fileURL(for: item))
+                                    .frame(width: 88, height: 50)
+                                    .clipShape(.rect(cornerRadius: 10))
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(item.kind.title).font(.headline).foregroundStyle(.primary)
                                     Text(item.createdAt, format: .dateTime.year().month().day().hour().minute())
@@ -84,6 +82,34 @@ struct MediaLibraryView: View {
             } message: { Text(errorMessage ?? "") }
             // The library loads its index once and publishes every capture or
             // deletion. Tab switches must not repeat a full synchronous disk scan.
+        }
+    }
+}
+
+/// The saved picture itself for snapshots; recordings show a play badge.
+private struct MediaThumbnail: View {
+    let item: CapturedMedia
+    let url: URL?
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: item.kind == .snapshot ? "photo" : "play.fill")
+                    .font(.body)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+        }
+        .accessibilityHidden(true)
+        .task(id: url) {
+            image = nil
+            guard item.kind == .snapshot, let url else { return }
+            let thumbnail = await SnapshotThumbnailLoader.shared.load(url: url, maximumPixelSize: 240)
+            guard !Task.isCancelled else { return }
+            image = thumbnail.map { UIImage(cgImage: $0.image) }
         }
     }
 }

@@ -34,6 +34,12 @@ struct DashboardConfiguration: Identifiable, Codable, Equatable, Sendable {
         includesAllCameras = try values.decode(Bool.self, forKey: .includesAllCameras)
     }
 
+    /// The live wall arranges its columns to fit the screen. The stored value
+    /// only shapes the cover: the squarest grid for one page.
+    static func coverColumns(forPageSize size: Int) -> Int {
+        min(8, max(1, Int(Double(max(1, size)).squareRoot().rounded(.up))))
+    }
+
     func cameras(from available: [CameraConfiguration]) -> [CameraConfiguration] {
         var seen = Set<UUID>()
         // One dictionary lookup per member instead of a linear scan each.
