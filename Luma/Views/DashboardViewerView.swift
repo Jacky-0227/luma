@@ -132,9 +132,10 @@ struct DashboardViewerView: View {
             showsPreparing = true
         }
         .lumaAlert($message)
-        // The wall is always dark, like the live player. A preferred scheme
-        // also gives the status bar light text over the black wall.
-        .preferredColorScheme(.dark)
+        // The wall is always dark. The app root sets the window's preferred
+        // scheme, so a preference here would be overridden; set it locally.
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .environment(\.colorScheme, .dark)
     }
 
     private var liveSummary: String {
@@ -425,7 +426,8 @@ private struct DashboardCameraTile: View {
     var body: some View {
         // The cell determines its size. The native drawable only fills that
         // proposal and keeps the stream's display aspect ratio (letterboxed).
-        Color(white: 0.06)
+        // A visible slot, so connecting and offline tiles still read as a grid.
+        Color(white: 0.13)
             .overlay {
                 if let player = camera.player {
                     VideoSurface(player: player)
@@ -438,6 +440,7 @@ private struct DashboardCameraTile: View {
                 if showsName { nameLabel }
             }
             .clipShape(.rect(cornerRadius: 6))
+            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(.white.opacity(0.08), lineWidth: 0.5) }
     }
 
     private var nameLabel: some View {

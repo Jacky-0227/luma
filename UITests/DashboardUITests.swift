@@ -7,8 +7,9 @@ final class DashboardUITests: XCTestCase {
     func testVideoWallFillsTheScreenWithProportionalNamedTiles() throws {
         for count in [4, 8, 16] {
             let app = XCUIApplication()
-            app.launchArguments = ["--ui-testing", "--ui-test-wall", "--ui-test-dark",
-                                   "-AppleLanguages", "(en)", "-AppleLocale", "en"]
+            // One light-appearance run checks the always-dark wall's chrome.
+            app.launchArguments = ["--ui-testing", "--ui-test-wall", "-AppleLanguages", "(en)", "-AppleLocale", "en"]
+                + (count == 8 ? [] : ["--ui-test-dark"])
             app.launchEnvironment["LUMA_UI_DASHBOARD_COUNT"] = String(count)
             app.launch()
             app.tabBars.buttons["Dashboard"].tap()

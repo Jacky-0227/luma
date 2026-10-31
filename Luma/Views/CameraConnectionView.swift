@@ -155,8 +155,6 @@ private struct LiveCameraView: View {
                 }
                 .presentationDetents([.fraction(0.62), .large])
                 .presentationDragIndicator(.visible)
-                // Over full-screen video, like the player itself.
-                .preferredColorScheme(.dark)
             }
         }
         // Turning the phone sideways shows the camera full screen, as in
