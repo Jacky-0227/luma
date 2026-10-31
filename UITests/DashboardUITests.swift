@@ -90,9 +90,13 @@ final class DashboardUITests: XCTestCase {
         let garden = selection("Garden", app: app)
         reveal(garden, app: app)
         garden.tap()
-        XCTAssertEqual(entry.value as? String, "Selected")
+        // Each selection adds an order row above the list, which can push the
+        // tapped row out of the lazy Form; scroll back to it before reading.
+        reveal(garden, app: app)
         XCTAssertEqual(garden.value as? String, "Selected")
         let gardenID = String(garden.identifier.dropFirst("dashboard.select.".count))
+        reveal(entry, app: app, towardTop: true)
+        XCTAssertEqual(entry.value as? String, "Selected")
         let entryID = String(entry.identifier.dropFirst("dashboard.select.".count))
         let moveGardenUp = app.buttons["dashboard.move-up.\(gardenID)"]
         reveal(moveGardenUp, app: app, towardTop: true)
